@@ -2,9 +2,9 @@
 
 *SWE5001 — Architecting Scalable Systems, Graduate Certificate in Architecting Scalable Systems (NUS–ISS)*
 
-Data models, domain class diagrams, and API surface for the four backend services, derived from the [user stories](https://claude.ai/code/artifact/7a3e1db9-56dc-4d3f-8bc1-3c5d870a97a2). One Amazon RDS for MySQL instance plays four independent databases via schema-per-service; Cognito owns authentication; a single SQS queue carries the one hand-off that can safely be asynchronous.
+Data models, domain class diagrams, and API surface for the six backend services, derived from the [user stories](https://claude.ai/code/artifact/7a3e1db9-56dc-4d3f-8bc1-3c5d870a97a2). One Amazon RDS for MySQL instance plays five independent databases via schema-per-service; Cognito owns user authentication and credentials; the stateless Authentication Service validates the browser-to-backend identity flow; the Authorization Policy Engine owns application authorization; and a single SQS queue carries the one hand-off that can safely be asynchronous.
 
-**At a glance:** 4 backend services · 1 MySQL instance, 4 schemas · 12 tables · 31 API endpoints · 1 SQS queue.
+**At a glance:** 6 backend services · 1 MySQL instance, 5 schemas · 13 tables · 36 OneStage API endpoints · 1 SQS queue.
 
 ---
 
@@ -25,10 +25,12 @@ graph TB
     GW["ALB / API Gateway<br/>path-based routing"]
 
     subgraph ECS["Amazon ECS Cluster"]
+        AS["Authentication<br/>Service"]
         EIS["Event & Inventory<br/>Service"]
         WR["Waiting Room /<br/>Queue Service"]
         CPS["Checkout & Payment<br/>Service"]
         TIV["Ticket Issuance &<br/>Validation Service"]
+        APS["Authorization<br/>Policy Engine"]
     end
 
     subgraph DB["Single Amazon RDS for MySQL Instance"]
@@ -36,6 +38,7 @@ graph TB
         SchemaQ[(queue schema)]
         SchemaCO[(checkout schema)]
         SchemaTI[(ticketing schema)]
+        SchemaAU[(authorization schema)]
     end
 
     SQS{{"Amazon SQS<br/>order-events queue"}}
@@ -51,11 +54,21 @@ graph TB
     GW --> WR
     GW --> CPS
     GW --> TIV
+    GW --> AS
+
+    AS -.validate JWT via JWKS.-> Cognito
+
+    EIS -->|authorize action| APS
+    WR -->|authorize action| APS
+    CPS -->|authorize action| APS
+    TIV -->|authorize action| APS
+    APS -.validate JWT via JWKS.-> Cognito
 
     EIS -->|owns| SchemaEI
     WR -->|owns| SchemaQ
     CPS -->|owns| SchemaCO
     TIV -->|owns| SchemaTI
+    APS -->|owns| SchemaAU
 
     CPS -->|publishes OrderPaid| SQS
     SQS -->|consumed by| TIV
@@ -67,19 +80,199 @@ graph TB
 
 ## Design decisions
 
-**One database, four schemas, no cross-schema foreign keys.** A single Amazon RDS for MySQL instance hosts `event_inventory`, `queue`, `checkout`, and `ticketing` — one per service — instead of four separate RDS instances, which keeps the school project's AWS bill and ops surface small. Each service's own tables carry real, enforced foreign keys. A reference to another service's row (e.g. `checkout.orders.event_id`) is stored as a plain unconstrained column instead, so the services stay logically independent and could be split onto separate instances later with zero schema change.
+**One database, five schemas, no cross-schema foreign keys.** A single Amazon RDS for MySQL instance hosts `event_inventory`, `queue`, `checkout`, `ticketing`, and `authorization` — one per service — instead of five separate RDS instances, which keeps the school project's AWS bill and ops surface small. Each service's own tables carry real, enforced foreign keys. A reference to another service's row (e.g. `checkout.orders.event_id` or `authorization.event_role_assignments.event_id`) is stored as a plain unconstrained column instead, so the services stay logically independent and could be split onto separate instances later with zero schema change.
 
 **Only one thing has to be synchronous: not overselling.** The one failure OneStage cannot tolerate is two buyers being confirmed for the same seat. So reserving and confirming an `InventoryHold` happens inside the Event & Inventory Service under a DB transaction, and Checkout calls `POST /holds/{id}/confirm` synchronously before it will mark an order `PAID` — if that call fails, the sale fails. Ticket generation and the confirmation email are not on that critical path, so Checkout instead publishes `OrderPaid` to the `order-events` SQS queue and Ticket Issuance consumes it asynchronously. That's the proposal's "event bus that decouples inventory and order events from downstream processing," scoped to the one hand-off where eventual consistency is actually fine.
 
-**Authorization rides on one small table, not a fifth service.** Cognito authenticates every request, but Organiser/Helper are per-event roles that don't map onto global Cognito groups. `event_team_memberships` in the Event & Inventory schema is the single source of truth: creating an event auto-inserts its creator as `ORGANISER`, and every organiser-or-helper-scoped endpoint in any service checks it via a synchronous internal call to `GET /events/{eventId}/team-members/{userSub}`. Every other endpoint just requires a valid Cognito JWT — any signed-in user is a Customer by default.
+**Authentication and authorization are separate concerns.** Cognito authenticates users and issues tokens. The Authorization Policy Engine maps the token's immutable `sub` claim to an application user, loads event-role facts from its own schema, and evaluates action-specific policy in version-controlled code. Organizer and Event Helper are per-event roles and therefore do not become Cognito groups. Every domain service remains responsible for enforcing the returned decision before performing the requested action.
 
-**What's deliberately left out.** Cognito's own login/token-refresh flow, network firewalls and WAF rules, a service mesh, and rate limiting beyond the waiting room's own admission control are all out of scope. IDs below are plain auto-increment `BIGINT`s rather than UUIDs, and every "email" field is a denormalized snapshot taken from the Cognito JWT at write time, so no service has to call another just to render a name.
+**What's deliberately left out.** Network firewalls and WAF rules, a service mesh, and rate limiting beyond the waiting room's own admission control are out of scope. IDs below are plain auto-increment `BIGINT`s rather than UUIDs, and every domain-specific "email" field is a denormalized snapshot taken from the Cognito JWT at write time, so no service has to call another just to render a name.
+
+---
+
+## Authentication and authorization
+
+Authentication answers *who is making the request*. Authorization answers *whether that user may perform this action on this resource*. Cognito is the identity provider, the stateless Authentication Service exposes the backend identity-verification boundary, the Authorization Policy Engine is the central policy decision point, and each domain service is a policy enforcement point. The Authentication Service owns no credential or password database because Cognito owns credentials, MFA, token issuance, and browser sessions.
+
+### Authentication flow — Cognito Hosted UI with Authorization Code and PKCE
+
+The browser never handles a client secret. It generates a PKCE verifier/challenge, redirects the user to Cognito Managed Login, receives a short-lived authorization code, and exchanges that code plus the verifier for tokens. The frontend sends the Cognito **access token**, not the ID token, as the API bearer token.
+
+```mermaid
+sequenceDiagram
+    actor U as User
+    participant SPA as OneStage SPA
+    participant C as Cognito Managed Login
+    participant API as OneStage API
+
+    U->>SPA: Open /login
+    SPA->>SPA: Generate PKCE verifier and challenge
+    SPA->>C: /oauth2/authorize (code + challenge)
+    C->>U: Authenticate user and complete MFA if required
+    C-->>SPA: Redirect URI with authorization code
+    SPA->>C: /oauth2/token (code + verifier)
+    C-->>SPA: Access, ID and refresh tokens
+    SPA->>API: API request + Bearer access token
+```
+
+The access token is validated for signature, issuer, expiry, app client, and `token_use=access`. The immutable Cognito `sub` claim is the external identity key. Email and username are not authorization identifiers because they can change.
+
+### Cognito-managed authentication endpoints
+
+These endpoints belong to Amazon Cognito, not to a OneStage backend service. The OAuth endpoints use the configured Hosted UI domain, while OIDC discovery and signing keys use the user-pool issuer domain. They are listed because the SPA and backend token validators depend on their contract. They are not included in the OneStage API endpoint total above.
+
+| Method | Path | Cognito host | Purpose | Caller |
+|---|---|---|---|---|
+| GET | `/oauth2/authorize` | Hosted UI domain | Start Managed Login using Authorization Code and PKCE | SPA / browser |
+| POST | `/oauth2/token` | Hosted UI domain | Exchange an authorization code or refresh token for tokens | SPA OAuth library |
+| GET | `/logout` | Hosted UI domain | End the Cognito browser session and redirect to an allowed sign-out URL | SPA / browser |
+| GET | `/.well-known/openid-configuration` | User-pool issuer domain | Discover issuer and OAuth/OIDC endpoint metadata | OAuth clients / tooling |
+| GET | `/.well-known/jwks.json` | User-pool issuer domain | Retrieve public keys used to validate Cognito JWT signatures | Backend token verifier |
+
+The app client is public and therefore has no client secret in the browser. Callback URLs, sign-out URLs, scopes, and Authorization Code grant support are configured on the Cognito app client.
+
+### OneStage Authentication Service endpoints
+
+| Method | Path | Description | Caller |
+|---|---|---|---|
+| GET | `/auth/me` | Validate the access token and return safe identity claims | Authenticated SPA / diagnostics |
+| GET | `/auth/health` | Report liveness/readiness without exposing Cognito configuration or secrets | Platform / load balancer |
+| POST | `/auth/roles/sync` | Transitional synchronization of the legacy Cognito Customer group | SPA during migration only |
+
+`POST /auth/roles/sync` exists in the current implementation but is deprecated in the target architecture. It must not grant Organizer or Event Helper access, and it is removed after all authorization decisions use RDS-backed assignments. New event-role behavior must not depend on Cognito groups or claims populated by this endpoint.
+
+### Authorization decision flow
+
+The domain service passes the original Cognito access token and a semantic action/resource request to the Authorization Policy Engine. The frontend may hide unavailable controls for usability, but frontend state is never an authorization authority.
+
+```mermaid
+sequenceDiagram
+    actor U as User
+    participant SPA as OneStage SPA
+    participant DS as Domain Service
+    participant APS as Authorization Policy Engine
+    participant C as Cognito JWKS
+    participant ADB as authorization schema
+
+    U->>SPA: Perform an event action
+    SPA->>DS: Request + Bearer access token
+    DS->>APS: POST /authorization/decisions + original token
+    APS->>C: Resolve signing key when not cached
+    APS->>APS: Validate token and extract Cognito sub
+    APS->>ADB: Load user and active event-role assignments
+    ADB-->>APS: Identity and role facts
+    APS->>APS: Evaluate action policy
+    APS-->>DS: allowed, reason, policyVersion
+    alt allowed
+        DS->>DS: Perform domain action
+        DS-->>SPA: Success
+    else denied
+        DS-->>SPA: 403 Forbidden
+    else decision unavailable
+        DS-->>SPA: 503 Service Unavailable (fail closed)
+    end
+```
+
+The policy engine returns a decision; it does not perform the business action. Unknown actions, invalid resource context, database failures, and indeterminate decisions never default to allow.
+
+### Authorization data model — `authorization` schema
+
+```mermaid
+erDiagram
+    USERS ||--o{ EVENT_ROLE_ASSIGNMENTS : receives
+    USERS ||--o{ EVENT_ROLE_ASSIGNMENTS : grants
+
+    USERS {
+        bigint user_id PK
+        varchar cognito_sub UK "immutable Cognito subject"
+        varchar email "profile snapshot, not an auth key"
+        enum status "ACTIVE, SUSPENDED, DELETED"
+        datetime created_at
+        datetime updated_at
+    }
+    EVENT_ROLE_ASSIGNMENTS {
+        bigint assignment_id PK
+        bigint user_id FK
+        bigint event_id "logical ref -> event_inventory.events, no FK"
+        enum role "ORGANIZER, EVENT_HELPER"
+        enum status "ACTIVE, REVOKED"
+        datetime valid_from "nullable"
+        datetime valid_until "nullable"
+        bigint assigned_by_user_id FK "nullable for system bootstrap"
+        datetime created_at
+        datetime updated_at
+    }
+```
+
+`users` is a local application identity projection, not an authentication store. It contains no password, access token, refresh token, MFA secret, or Cognito client secret. A unique `cognito_sub` maps a validated Cognito identity to the internal `user_id` used by role assignments and audit records.
+
+`event_role_assignments` stores privileged, event-scoped facts. A unique `(event_id, user_id, role)` constraint allows a user to hold more than one independent role for the same event. The authorization lookup is indexed by `(user_id, event_id, status)`. An assignment is effective only when it is active and within its optional validity window.
+
+An authenticated active user is a Customer by default. Customer access is derived from domain ownership such as `orders.customer_sub`, `tickets.customer_sub`, or an event registration—not from a `CUSTOMER` row for every user/event combination. This avoids duplicating business facts and avoids growth proportional to every possible user/event pair.
+
+### Central policy model
+
+Role assignments are facts stored in RDS. Action-to-role policy remains in version-controlled application code so developers can review and change authorization behavior in one place.
+
+| Action | Required facts |
+|---|---|
+| `event:create` | Authenticated, active user |
+| `event:update` | Active `ORGANIZER` assignment for the event |
+| `event:publish` | Active `ORGANIZER` assignment for the event |
+| `event-helper:assign` | Active `ORGANIZER` assignment for the event |
+| `ticket:check-in` | Active `ORGANIZER` or `EVENT_HELPER` assignment for the event |
+| `order:view` | Authenticated user owns the order |
+
+### Authorization API endpoints
+
+| Method | Path | Description | Caller |
+|---|---|---|---|
+| POST | `/authorization/decisions` | Evaluate an action against a resource | Backend services |
+| GET | `/authorization/users/me` | Resolve the authenticated Cognito subject to the application user | Authenticated user |
+| POST | `/authorization/events/{eventId}/role-assignments` | Assign Organizer or Event Helper | Organizer / system bootstrap |
+| GET | `/authorization/events/{eventId}/role-assignments` | List active and historical event assignments | Organizer / Event Helper |
+| PATCH | `/authorization/events/{eventId}/role-assignments/{assignmentId}` | Change validity or status | Organizer |
+| DELETE | `/authorization/events/{eventId}/role-assignments/{assignmentId}` | Revoke an assignment idempotently | Organizer |
+| GET | `/authorization/health` | Report policy-engine and database readiness without exposing secrets | Platform / load balancer |
+
+An invalid or expired token returns `401`. A valid user without the required permission receives an `allowed: false` decision, which the calling service enforces as `403`. If the policy engine or its database cannot make a trustworthy decision, the caller returns `503` and performs no protected action. Calls use bounded timeouts, correlation IDs, structured logs without tokens, and no decision caching initially so revocation is visible on the next request.
+
+### Event creator bootstrap
+
+Creating an event and assigning its creator as Organizer spans two service-owned schemas, so it cannot use one database transaction. The operation must be idempotent and must not expose an organizer-less event as ready for use.
+
+```mermaid
+sequenceDiagram
+    actor U as User
+    participant EIS as Event & Inventory Service
+    participant APS as Authorization Policy Engine
+    participant EDB as event_inventory schema
+    participant ADB as authorization schema
+
+    U->>EIS: POST /events + access token
+    EIS->>APS: Decide event:create
+    APS-->>EIS: allowed
+    EIS->>EDB: Create DRAFT_PENDING_AUTHORIZATION event
+    EIS->>APS: Idempotently assign creator as ORGANIZER
+    APS->>ADB: Insert or return existing assignment
+    APS-->>EIS: Assignment active
+    EIS->>EDB: Transition event to DRAFT
+    EIS-->>U: Event created
+```
+
+If assignment fails, the event remains non-publishable and the service retries safely using the event id as the idempotency boundary. A later outbox-based workflow may replace the synchronous bootstrap if reliability or scale requires it.
+
+### Current implementation and migration considerations
+
+This document describes the **target architecture**. The current backend schema still contains `customers` and stores one `events.organizer_id` foreign key. It does not yet contain the target `authorization.users` or `authorization.event_role_assignments` tables.
+
+Database migration remains a separate, explicitly reviewed change. A safe rollout is additive: introduce the identity and assignment tables, backfill Cognito subjects and existing organizers, temporarily reconcile old and new organizer representations, switch authorization reads to the policy engine, and remove the legacy organizer source only in a later cleanup migration. No cross-schema foreign key is introduced, and the old source is not removed until all consumers have cut over and consistency checks pass.
 
 ---
 
 ## Event & Inventory Service — `event_inventory` schema
 
-The platform's core technical risk: owns events, their inventory (GA quantity or a seat map), event-team roles, and the concurrency-safe hold that guarantees a seat or quantity is never sold twice.
+The platform's core technical risk: owns events, their inventory (GA quantity or a seat map), and the concurrency-safe hold that guarantees a seat or quantity is never sold twice. Event-role assignments belong to the Authorization Policy Engine.
 
 ### Data model
 
@@ -87,7 +280,6 @@ The platform's core technical risk: owns events, their inventory (GA quantity or
 erDiagram
     EVENTS ||--o{ INVENTORY_ITEMS : offers
     EVENTS ||--o{ SEATS : contains
-    EVENTS ||--o{ EVENT_TEAM_MEMBERSHIPS : "staffed by"
     EVENTS ||--o{ INVENTORY_HOLDS : locks
     INVENTORY_ITEMS ||--o{ SEATS : "maps to (Tier 2 only)"
     INVENTORY_ITEMS ||--o{ INVENTORY_HOLDS : "reserved via"
@@ -95,7 +287,7 @@ erDiagram
 
     EVENTS {
         bigint event_id PK
-        varchar organiser_sub "Cognito sub, creator"
+        bigint created_by_user_id "logical ref -> authorization.users, no FK"
         varchar title
         text description
         varchar venue
@@ -104,15 +296,6 @@ erDiagram
         enum status "DRAFT, PUBLISHED, CANCELLED"
         datetime created_at
         datetime updated_at
-    }
-    EVENT_TEAM_MEMBERSHIPS {
-        bigint membership_id PK
-        bigint event_id FK
-        varchar user_sub "Cognito sub"
-        varchar user_email
-        enum role "ORGANISER, HELPER"
-        varchar granted_by_sub
-        datetime granted_at
     }
     INVENTORY_ITEMS {
         bigint inventory_item_id PK
@@ -153,7 +336,7 @@ erDiagram
 classDiagram
     class Event {
         +Long eventId
-        +String organiserSub
+        +Long createdByUserId
         +String title
         +String description
         +String venue
@@ -163,14 +346,6 @@ classDiagram
         +publish()
         +cancel()
         +updateDetails()
-    }
-    class EventTeamMembership {
-        +Long membershipId
-        +Long eventId
-        +String userSub
-        +String userEmail
-        +Role role
-        +String grantedBySub
     }
     class InventoryItem {
         +Long inventoryItemId
@@ -233,34 +408,24 @@ classDiagram
         RELEASED
         EXPIRED
     }
-    class Role {
-        <<enumeration>>
-        ORGANISER
-        HELPER
-    }
     class EventInventoryService {
         <<service>>
         +createEvent(dto) Event
         +configureInventory(eventId, dto)
         +publishEvent(eventId)
-        +addTeamMember(eventId, email, role)
-        +removeTeamMember(eventId, userSub)
         +reserveInventory(eventId, itemId, qty, seatIds) InventoryHold
         +confirmHold(holdId, orderId)
         +releaseHold(holdId)
-        +isAuthorised(eventId, userSub, role) bool
     }
 
     Event "1" *-- "0..*" InventoryItem : offers
     Event "1" *-- "0..*" Seat : contains
-    Event "1" *-- "0..*" EventTeamMembership : staffed by
     Event "1" *-- "0..*" InventoryHold : locks
     InventoryItem "1" o-- "0..*" Seat : maps to
     InventoryItem "1" <-- "0..*" InventoryHold : reserved via
     Seat "0..1" <-- "0..1" InventoryHold : held by
     EventInventoryService ..> Event : manages
     EventInventoryService ..> InventoryHold : manages
-    EventInventoryService ..> EventTeamMembership : manages
 ```
 
 ### API endpoints
@@ -275,11 +440,6 @@ classDiagram
 | POST | `/events/{eventId}/cancel` | Cancel the event | Organiser |
 | PUT | `/events/{eventId}/inventory` | Configure ticket quantity / seat map | Organiser |
 | GET | `/events/{eventId}/seats` | Seat map with live status | Any |
-| POST | `/events/{eventId}/team-members` | Add a user as Organiser or Helper | Organiser |
-| GET | `/events/{eventId}/team-members` | View the event's team roster | Organiser / Helper |
-| PATCH | `/events/{eventId}/team-members/{userSub}` | Change a member's role | Organiser |
-| DELETE | `/events/{eventId}/team-members/{userSub}` | Remove a member | Organiser |
-| GET | `/events/{eventId}/team-members/{userSub}` | AuthZ check: does user hold role X (internal) | Service-to-service |
 | POST | `/events/{eventId}/inventory/hold` | Reserve seats / quantity (soft lock) | Customer |
 | POST | `/holds/{holdId}/release` | Release a hold | Customer / internal sweep |
 | POST | `/holds/{holdId}/confirm` | Confirm a hold as sold (sync, no-oversell path) | Checkout Service |
