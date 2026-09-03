@@ -71,7 +71,7 @@ graph TB
 
 **Only one thing has to be synchronous: not overselling.** The one failure OneStage cannot tolerate is two buyers being confirmed for the same seat. So reserving and confirming an `InventoryHold` happens inside the Event & Inventory Service under a DB transaction, and Checkout calls `POST /holds/{id}/confirm` synchronously before it will mark an order `PAID` — if that call fails, the sale fails. Ticket generation and the confirmation email are not on that critical path, so Checkout instead publishes `OrderPaid` to the `order-events` SQS queue and Ticket Issuance consumes it asynchronously. That's the proposal's "event bus that decouples inventory and order events from downstream processing," scoped to the one hand-off where eventual consistency is actually fine.
 
-**Authorization rides on one small table, not a fifth service.** Cognito authenticates every request, but Organiser/Helper are per-event roles that don't map onto global Cognito groups. `event_team_memberships` in the Event & Inventory schema is the single source of truth: creating an event auto-inserts its creator as `ORGANISER`, and every organiser-or-helper-scoped endpoint in any service checks it via a synchronous internal call to `GET /events/{eventId}/team-members/{userSub}`. Every other endpoint just requires a valid Cognito JWT — any signed-in user is a Customer by default.
+**Authorization rides on one small table, not a fifth service.** Cognito authenticates every request, but Organiser/Helper are per-event roles that don't map onto global Cognito groups. `event_team_memberships` in the Event & Inventory schema is the single source of truth: creating an event auto-inserts its creator as `ORGANISER`, and every organiser-or-helper-scoped endpoint in any service checks it via a synchronous internal call to `GET /events/{eventId}/team-members/{userSub}`. Every other endpoint just requires a valid Cognito JWT — any signed-in user is a Customer by default. Removing a member is a **soft revoke**, not a delete: `status` flips to `REVOKED` and `revoked_at` is stamped, so the row stays as an audit record of who had access to an event and when. Re-adding the same person later reactivates that row (updates `status`, `granted_by_sub`, `granted_at`) rather than inserting a duplicate, so the `(event_id, user_sub)` uniqueness constraint still holds.
 
 **What's deliberately left out.** Cognito's own login/token-refresh flow, network firewalls and WAF rules, a service mesh, and rate limiting beyond the waiting room's own admission control are all out of scope. IDs below are plain auto-increment `BIGINT`s rather than UUIDs, and every "email" field is a denormalized snapshot taken from the Cognito JWT at write time, so no service has to call another just to render a name.
 
@@ -111,8 +111,10 @@ erDiagram
         varchar user_sub "Cognito sub"
         varchar user_email
         enum role "ORGANISER, HELPER"
+        enum status "ACTIVE, REVOKED"
         varchar granted_by_sub
         datetime granted_at
+        datetime revoked_at "nullable"
     }
     INVENTORY_ITEMS {
         bigint inventory_item_id PK
@@ -170,7 +172,12 @@ classDiagram
         +String userSub
         +String userEmail
         +Role role
+        +MembershipStatus status
         +String grantedBySub
+        +DateTime grantedAt
+        +DateTime revokedAt
+        +revoke()
+        +reactivate(grantedBySub)
     }
     class InventoryItem {
         +Long inventoryItemId
@@ -238,13 +245,18 @@ classDiagram
         ORGANISER
         HELPER
     }
+    class MembershipStatus {
+        <<enumeration>>
+        ACTIVE
+        REVOKED
+    }
     class EventInventoryService {
         <<service>>
         +createEvent(dto) Event
         +configureInventory(eventId, dto)
         +publishEvent(eventId)
         +addTeamMember(eventId, email, role)
-        +removeTeamMember(eventId, userSub)
+        +revokeTeamMember(eventId, userSub)
         +reserveInventory(eventId, itemId, qty, seatIds) InventoryHold
         +confirmHold(holdId, orderId)
         +releaseHold(holdId)
@@ -275,10 +287,10 @@ classDiagram
 | POST | `/events/{eventId}/cancel` | Cancel the event | Organiser |
 | PUT | `/events/{eventId}/inventory` | Configure ticket quantity / seat map | Organiser |
 | GET | `/events/{eventId}/seats` | Seat map with live status | Any |
-| POST | `/events/{eventId}/team-members` | Add a user as Organiser or Helper | Organiser |
-| GET | `/events/{eventId}/team-members` | View the event's team roster | Organiser / Helper |
+| POST | `/events/{eventId}/team-members` | Add a user as Organiser or Helper (reactivates the row if they were previously revoked) | Organiser |
+| GET | `/events/{eventId}/team-members` | View the event's active team roster | Organiser / Helper |
 | PATCH | `/events/{eventId}/team-members/{userSub}` | Change a member's role | Organiser |
-| DELETE | `/events/{eventId}/team-members/{userSub}` | Remove a member | Organiser |
+| DELETE | `/events/{eventId}/team-members/{userSub}` | Revoke a member's access — soft-delete: status → REVOKED, row kept for audit | Organiser |
 | GET | `/events/{eventId}/team-members/{userSub}` | AuthZ check: does user hold role X (internal) | Service-to-service |
 | POST | `/events/{eventId}/inventory/hold` | Reserve seats / quantity (soft lock) | Customer |
 | POST | `/holds/{holdId}/release` | Release a hold | Customer / internal sweep |
