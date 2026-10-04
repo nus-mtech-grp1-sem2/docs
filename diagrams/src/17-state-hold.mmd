@@ -1,0 +1,10 @@
+%% Figure: Inventory hold lifecycle (event_inventory.inventory_holds.status).
+stateDiagram-v2
+    [*] --> ACTIVE: POST /orders reserves seats or quantity
+    ACTIVE --> CONFIRMED: payment captured (seats SOLD, sold_qty +n)
+    ACTIVE --> RELEASED: payment declined or customer cancels
+    ACTIVE --> EXPIRED: expires_at passed (3 min), swept on next order or payment
+    ACTIVE --> RELEASED: payment arrives after expiry
+    CONFIRMED --> [*]
+    RELEASED --> [*]
+    EXPIRED --> [*]

@@ -1,0 +1,36 @@
+%% Figure: Who reads and writes which schema (from SQL in each service's source).
+flowchart LR
+    subgraph SVC["Services"]
+        EV["event"]
+        INV["inventory"]
+        Q["queue"]
+        ORD["order"]
+        TKT["ticket"]
+        NTF["notification"]
+    end
+    subgraph DB["Schemas"]
+        EI[("event_inventory")]
+        QS[("queue")]
+        CO[("checkout")]
+        TI[("ticketing")]
+        NO[("notification")]
+    end
+
+    EV ==>|owns| EI
+    INV ==>|owns| EI
+    Q ==>|owns| QS
+    ORD ==>|owns| CO
+    TKT ==>|owns| TI
+    NTF ==>|owns| NO
+
+    ORD -->|"writes holds, items, seats"| EI
+    ORD -->|"writes entries"| QS
+    EV -->|"writes on cancel"| TI
+    EV -->|"writes on cancel; reads"| CO
+    TKT -->|"writes refunds; reads"| CO
+    Q -.->|reads| EI
+    TKT -.->|reads| EI
+    TKT -.->|reads| QS
+    TKT -.->|reads| NO
+
+    linkStyle 6,7,8,9,10 stroke:#c0392b,stroke-width:2px

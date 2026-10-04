@@ -1,0 +1,77 @@
+%% Figure: Logical detail deployment diagram (as built).
+flowchart TB
+    subgraph Client["Client tier"]
+        SPA["Angular SPA<br/>customer, organiser and helper workspaces"]
+    end
+
+    subgraph Edge["Edge tier"]
+        CDN["CDN and TLS edge<br/>(static assets + /api/* routing)"]
+        Static[("Static asset store")]
+    end
+
+    subgraph Gateway["Gateway tier"]
+        GW["API gateway<br/>path routing, correlation id,<br/>per-IP rate limit on writes"]
+    end
+
+    subgraph Services["Business service tier"]
+        EV["Event service<br/>catalogue, team, invitations"]
+        INV["Inventory service<br/>zones, seat map, seat edits"]
+        Q["Queue service<br/>waiting room, admission scheduler"]
+        ORD["Order service<br/>reserve + order, payment worker"]
+        TKT["Ticket service<br/>issuance consumer, check-in,<br/>reconciliation sweep"]
+        NTF["Notification service<br/>per-ticket email"]
+    end
+
+    subgraph Integration["Integration tier (message channels)"]
+        PR{{"payment-requests<br/>+ DLQ"}}
+        OE{{"order-events"}}
+        CA{{"customer-admitted<br/>(no consumer yet)"}}
+    end
+
+    subgraph Data["Data tier: one relational DB server, schema per service"]
+        S_EI[("event_inventory")]
+        S_Q[("queue")]
+        S_CO[("checkout")]
+        S_T[("ticketing")]
+        S_N[("notification")]
+    end
+
+    IdP[("Identity provider")]
+    Mail[("SMTP relay")]
+
+    SPA -->|HTTPS| CDN
+    CDN --> Static
+    CDN -->|"/api/*"| GW
+    SPA -.->|"sign in, tokens"| IdP
+
+    GW -->|/api/event| EV
+    GW -->|/api/inventory| INV
+    GW -->|/api/queue| Q
+    GW -->|/api/order| ORD
+    GW -->|/api/ticket| TKT
+    GW -->|/api/notification| NTF
+
+    EV --> S_EI
+    INV --> S_EI
+    Q --> S_Q
+    ORD --> S_CO
+    TKT --> S_T
+    NTF --> S_N
+
+    ORD -. "reserve, confirm (same txn)" .-> S_EI
+    ORD -. "admission token check" .-> S_Q
+    Q -. "availability read" .-> S_EI
+    TKT -. "order, event, staff reads" .-> S_CO
+    TKT -.-> S_EI
+    EV -. "cancel: void tickets, refund orders" .-> S_T
+    EV -.-> S_CO
+
+    ORD -->|PaymentRequested| PR
+    PR -->|consume| ORD
+    ORD -->|OrderPaid| OE
+    OE -->|consume| TKT
+    Q -->|CustomerAdmitted| CA
+    ORD -->|"admit-next (sync, 1 s timeout)"| Q
+    TKT -->|"order-confirmation,<br/>event-cancellation (sync)"| NTF
+    NTF --> Mail
+    EV -->|"user lookup"| IdP

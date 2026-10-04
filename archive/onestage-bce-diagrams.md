@@ -1,5 +1,7 @@
 # OneStage — BCE Sequence Diagrams
 
+> **Archived: original design, August 2026.** This document records the design as first planned. The system as built differs in several ways (see `architecture/00-overview.md`, "Original design versus the system as built"). For the current design, read `architecture/`. Kept unchanged below as a historical record.
+
 *SWE5001 · Architecting Scalable Systems · Graduate Certificate, NUS–ISS*
 
 Boundary–Control–Entity sequence diagrams for all 27 user stories, showing exactly which screen, service, and domain object handles each step. Control objects are the service façades and Entity objects are the domain classes from the *System Design* doc; the stories themselves are in *User Stories & Use-Case Diagrams*.

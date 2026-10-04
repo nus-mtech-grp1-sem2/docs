@@ -1,0 +1,8 @@
+%% Figure: Ticket lifecycle (ticketing.tickets.status).
+stateDiagram-v2
+    [*] --> ISSUED: OrderPaid consumed
+    ISSUED --> CHECKED_IN: first valid scan (SUCCESS)
+    CHECKED_IN --> CHECKED_IN: later scans log DUPLICATE
+    ISSUED --> VOID: event cancelled
+    CHECKED_IN --> VOID: event cancelled
+    VOID --> [*]

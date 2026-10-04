@@ -1,0 +1,48 @@
+%% Figure: Tier 2 purchase under contention. Two admitted customers select the same seat.
+sequenceDiagram
+    autonumber
+    actor A as Customer A
+    actor B as Customer B
+    participant SPA as Angular SPA
+    participant K as Kong
+    participant Q as Queue service
+    participant O as Order service
+    participant DB as MySQL (event_inventory, queue, checkout)
+
+    Note over A,Q: Waiting room (Tier 2 only)
+    A->>K: POST /api/queue/events/42/queue/join
+    K->>Q: POST /events/42/queue/join (rate limited 60/min/IP)
+    Q->>DB: lock queue_sessions row, insert queue_entries (WAITING, position n)
+    Q-->>A: 201 position n
+    loop every 3 s
+        SPA->>Q: GET /events/42/queue/me
+    end
+    Note over Q,DB: Admission scheduler (every 1 s, in every queue task)<br/>serialised by SELECT ... FOR UPDATE on queue_sessions
+    Q->>DB: admit up to min(buyer cap - active buyers, seats left) WAITING entries
+    Q->>DB: status ADMITTED, admission_token, token_expires_at = now + 600 s
+    Q-->>Q: publish CustomerAdmitted v1 to SQS (best effort)
+    SPA->>Q: GET /queue/me
+    Q-->>A: ADMITTED + admission token
+
+    Note over A,DB: Reserve and create order: one local ACID transaction
+    par Customer A and Customer B submit at the same moment
+        A->>O: POST /api/order/orders {eventId 42, seatIds [17], admissionToken}
+    and
+        B->>O: POST /api/order/orders {eventId 42, seatIds [17], admissionToken}
+    end
+    O->>DB: expire stale reservations for event 42 (own transaction)
+    O->>DB: BEGIN
+    O->>DB: SELECT event (on sale, not started)
+    O->>DB: SELECT queue_entries ... admission_token valid FOR UPDATE
+    O->>DB: SELECT seats WHERE seat_id IN (17) ORDER BY seat_id FOR UPDATE
+    Note right of DB: A's transaction takes the row lock on seat 17.<br/>B's identical statement blocks here.
+    O->>DB: INSERT inventory_holds (ACTIVE, expires now + 3 min)
+    O->>DB: UPDATE seats SET status HELD, hold_id
+    O->>DB: INSERT orders (PENDING), order_items (price snapshot)
+    O->>DB: UPDATE inventory_holds.order_id, queue_entries IN_CHECKOUT
+    O->>DB: COMMIT (lock released)
+    O-->>A: 201 order PENDING
+    Note right of DB: B's SELECT ... FOR UPDATE now returns seat 17 as HELD
+    O->>DB: ROLLBACK (B)
+    O-->>B: 409 inventory_unavailable
+    SPA-->>B: "Tickets are currently unavailable or sold out. Refresh the event" (CU-09)

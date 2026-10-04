@@ -1,0 +1,34 @@
+%% Figure: checkout schema, as built. Owned by the order service.
+erDiagram
+    ORDERS ||--|{ ORDER_ITEMS : contains
+    ORDERS ||--o{ PAYMENTS : "paid via"
+    ORDERS {
+        bigint order_id PK
+        bigint event_id "logical ref"
+        varchar customer_sub
+        varchar customer_email "snapshot from JWT"
+        varchar customer_name "snapshot"
+        bigint hold_id "UK, logical ref inventory_holds"
+        enum status "PENDING, PAID, FAILED, CANCELLED"
+        int total_amount_cents
+        char currency "SGD"
+        datetime created_at
+        datetime paid_at "nullable"
+    }
+    ORDER_ITEMS {
+        bigint order_item_id PK
+        bigint order_id FK
+        bigint inventory_item_id "logical ref"
+        bigint seat_id "nullable, logical ref"
+        varchar description "price-time snapshot"
+        int quantity
+        int unit_price_cents
+    }
+    PAYMENTS {
+        bigint payment_id PK
+        bigint order_id FK
+        varchar payment_token "mock token, no card data"
+        enum status "AUTHORIZED, CAPTURED, FAILED"
+        int amount_cents
+        datetime processed_at
+    }

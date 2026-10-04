@@ -1,0 +1,28 @@
+%% Figure: Context map. Bounded contexts and their relationships (as built). Details in the table that follows the figure.
+flowchart TB
+    IAM["Identity (generic)<br/>Amazon Cognito"]
+
+    subgraph Core["Core domain: sell scarce inventory without oversell"]
+        CAT["Event Catalogue<br/>event, team membership"]
+        INV["Inventory<br/>inventory item, seat, hold"]
+        CHK["Checkout<br/>order, order item, payment"]
+        WR["Waiting Room<br/>queue session, queue entry"]
+        CAT ---|Shared Kernel| INV
+        INV ---|Shared Kernel| CHK
+        WR -->|Customer-Supplier| INV
+        CHK -->|Customer-Supplier| WR
+    end
+
+    subgraph Supporting["Supporting subdomains"]
+        TKT["Ticketing<br/>ticket, check-in log"]
+        NTF["Notification<br/>email notification"]
+        TKT -->|Customer-Supplier| NTF
+    end
+
+    FUT["Future consumers"]
+
+    IAM -->|Open Host Service| Core
+    IAM --> Supporting
+    CHK ==>|"Published Language: OrderPaid"| TKT
+    WR ==>|"Published Language: CustomerAdmitted"| FUT
+    CAT -.->|Conformist| TKT
