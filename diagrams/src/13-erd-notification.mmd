@@ -1,0 +1,16 @@
+%% Figure: notification schema, as built (migrations 06, 15, 16). Owned by the notification service.
+erDiagram
+    EMAIL_NOTIFICATIONS {
+        bigint notification_id PK
+        bigint order_id "logical ref, indexed"
+        bigint ticket_id "UK, nullable, logical ref"
+        bigint event_id "logical ref"
+        varchar customer_sub
+        varchar customer_email
+        enum type "ORDER_CONFIRMATION, EVENT_CANCELLATION"
+        enum status "PENDING, SENT, FAILED"
+        varchar subject
+        text error_message "nullable"
+        datetime sent_at "nullable"
+        datetime created_at
+    }

@@ -1,0 +1,38 @@
+%% Figure: Tiers and the layers inside each Node.js service.
+flowchart LR
+    subgraph T1["Presentation tier"]
+        direction TB
+        A1["Angular 21 SPA<br/>standalone components, lazy routes"]
+        A2["Core services<br/>ApiService, auth interceptor, guards"]
+        A1 --> A2
+    end
+    subgraph T2["Edge and gateway tier"]
+        direction TB
+        B1["CloudFront<br/>TLS, static cache, /api/* behaviour"]
+        B2["ALB"]
+        B3["Kong (DB-less)<br/>routes, rate-limiting, correlation-id"]
+        B1 --> B2 --> B3
+    end
+    subgraph T3["Business logic tier (one container per service)"]
+        direction TB
+        C1["HTTP layer<br/>Express routes, input parsing"]
+        C2["Security layer<br/>Cognito JWT verify, event-role check,<br/>internal token / scanner session"]
+        C3["Domain logic<br/>reserve, admit, pay, issue, check in"]
+        C4["Background workers<br/>SQS consumers, schedulers, sweeps"]
+        C5["Data access<br/>mysql2 pool, explicit transactions"]
+        C1 --> C2 --> C3 --> C5
+        C4 --> C3
+    end
+    subgraph T4["Integration tier"]
+        D1["Amazon SQS<br/>3 queues + 1 DLQ"]
+        D2["Service Connect<br/>sync service-to-service HTTP"]
+    end
+    subgraph T5["Data tier"]
+        E1["MySQL 8.0<br/>5 schemas, InnoDB"]
+        E2["Amazon EFS<br/>encrypted data volume"]
+        E1 --> E2
+    end
+    T1 -->|"HTTPS + Bearer JWT"| T2
+    T2 -->|HTTP| T3
+    T3 <--> T4
+    T3 --> T5

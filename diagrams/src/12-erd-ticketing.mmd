@@ -1,0 +1,26 @@
+%% Figure: ticketing schema, as built. Owned by the ticket service.
+erDiagram
+    TICKETS ||--o{ CHECK_IN_LOGS : records
+    TICKETS {
+        bigint ticket_id PK
+        bigint order_id "logical ref checkout.orders"
+        bigint order_item_id "logical ref"
+        bigint event_id "logical ref"
+        varchar customer_sub
+        varchar customer_email
+        varchar customer_name
+        bigint seat_id "nullable, logical ref"
+        varchar qr_token "UK, 32 random bytes"
+        enum status "ISSUED, CHECKED_IN, VOID"
+        datetime issued_at
+        datetime checked_in_at "nullable"
+        varchar checked_in_by_sub "nullable"
+    }
+    CHECK_IN_LOGS {
+        bigint log_id PK
+        bigint ticket_id FK "nullable for unknown codes"
+        varchar scanned_by_sub
+        enum result "SUCCESS, DUPLICATE, INVALID, WRONG_EVENT"
+        varchar attempted_token "nullable, first 128 chars"
+        datetime scanned_at
+    }

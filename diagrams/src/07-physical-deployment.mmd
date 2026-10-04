@@ -1,0 +1,55 @@
+%% Figure: Physical detail deployment diagram, AWS ap-southeast-1, account swe5001-project.
+flowchart TB
+    User(["Browser"])
+    GMAIL[("Gmail SMTP :465")]
+
+    subgraph Edge["AWS global edge"]
+        CF["CloudFront distribution<br/>TLS (default certificate), PriceClass_200<br/>default behaviour: S3, CachingOptimized<br/>/api/* behaviour: ALB, CachingDisabled<br/>viewer function: spa-routing"]
+    end
+
+    subgraph Region["Region ap-southeast-1"]
+        S3[("S3 frontend bucket<br/>private, OAC, SSE, versioned")]
+        COG["Cognito user pool<br/>managed login<br/>(outside Terraform)"]
+
+        subgraph VPC["VPC onestage-vpc 10.0.0.0/16, internet gateway, no NAT gateway"]
+            ALB["Application Load Balancer, HTTP :80<br/>SG onestage-alb: ingress only from CloudFront prefix list"]
+            subgraph Subnets["Public subnets 10.0.0.0/24 (AZ 1a) and 10.0.1.0/24 (AZ 1b); ECS places each task in either"]
+                subgraph ECS["ECS cluster onestage-cluster, Fargate, awsvpc, public IP, SG onestage-ecs-tasks"]
+                    KONG["kong x1-4<br/>0.25 vCPU / 0.5 GB<br/>scale on ALB requests per target = 75"]
+                    NODE["event, inventory, queue, order,<br/>ticket, notification, auth<br/>each x1-3, 0.25 vCPU / 0.5 GB<br/>scale on CPU = 60%"]
+                    MYSQL["mysql:8.0 x1<br/>0.5 vCPU / 1 GB<br/>not autoscaled"]
+                end
+                MT["EFS mount target in each subnet<br/>SG onestage-efs: NFS from tasks only"]
+            end
+        end
+
+        EFS[("EFS file system<br/>encrypted at rest and in transit<br/>access point uid/gid 999")]
+
+        subgraph Managed["Regional managed services (reached over HTTPS via the internet gateway)"]
+            SQS{{"SQS, SSE<br/>payment-requests + DLQ<br/>order-events, customer-admitted"}}
+            SM["Secrets Manager<br/>onestage/mysql"]
+            ECR["ECR<br/>onestage-backend, onestage-kong"]
+            CW["CloudWatch Logs and alarms<br/>VPC flow logs"]
+        end
+
+        subgraph Ops["Operations"]
+            BK["AWS Backup<br/>EFS daily 02:00 SGT, 7 days"]
+            SCH["EventBridge Scheduler<br/>scale to 0, 02:00-18:00 SGT Mon-Fri"]
+            BUD["AWS Budgets<br/>USD 100 / month"]
+        end
+    end
+
+    User -->|HTTPS| CF
+    User -.->|hosted login| COG
+    CF -->|OAC| S3
+    CF -->|"HTTP origin hop"| ALB
+    ALB -->|":8000 proxy, :8100 health"| KONG
+    KONG -->|Service Connect| NODE
+    NODE -->|"Service Connect :3306"| MYSQL
+    MYSQL --> MT
+    MT -->|NFS 2049, TLS| EFS
+    NODE -->|:443| Managed
+    NODE -->|":443 JWKS, admin API"| COG
+    NODE -->|:465| GMAIL
+    BK -.-> EFS
+    SCH -.->|ecs:UpdateService| ECS

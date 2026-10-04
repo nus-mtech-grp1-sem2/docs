@@ -1,0 +1,23 @@
+%% Figure: System context. Who uses OneStage and which external systems it depends on.
+flowchart LR
+    Customer(["Customer<br/>buys tickets"])
+    Organiser(["Event Organiser<br/>creates and runs events"])
+    Helper(["Event Helper<br/>checks tickets in at the door"])
+
+    OneStage["<b>OneStage platform</b><br/>event catalogue, inventory,<br/>waiting room, checkout,<br/>ticketing, notification"]
+
+    Cognito[("Amazon Cognito<br/>identity provider")]
+    SMTP[("Gmail SMTP<br/>email delivery")]
+    Pay[("Payment provider<br/>(simulated in-platform)")]
+
+    Customer -->|"browse, queue, pay,<br/>view QR tickets"| OneStage
+    Organiser -->|"create events, inventory,<br/>team, sales, attendees"| OneStage
+    Helper -->|"scan QR, manual lookup,<br/>check-in progress"| OneStage
+
+    Customer -.->|sign in| Cognito
+    Organiser -.->|sign in| Cognito
+    Helper -.->|sign in| Cognito
+    OneStage -->|"verify JWT, look up users"| Cognito
+    OneStage -->|"ticket and cancellation emails"| SMTP
+    SMTP -.->|email with QR code| Customer
+    OneStage -.->|"tokenised payment<br/>(mock token only)"| Pay

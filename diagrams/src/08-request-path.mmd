@@ -1,0 +1,16 @@
+%% Figure: Request path and trust boundaries for one API call.
+flowchart TB
+    B(["Browser"])
+    CF["CloudFront<br/>TLS terminates here"]
+    ALB["ALB<br/>accepts CloudFront prefix list only"]
+    K["Kong<br/>trusts VPC and CloudFront ranges to recover the client IP<br/>rate limit: POST /api/queue, /api/order at 60/min per IP<br/>adds X-Request-Id, strips /api/&lt;service&gt;"]
+    S["Service<br/>verifies Cognito access token (aws-jwt-verify)<br/>checks event role in event_team_memberships"]
+    S2["Another service<br/>x-internal-token or HMAC scanner session"]
+    DB[("MySQL")]
+
+    B -->|"1. HTTPS, Bearer access token"| CF
+    CF -->|"2. HTTP, X-Forwarded-For"| ALB
+    ALB -->|"3. HTTP :8000"| K
+    K -->|"4. Service Connect"| S
+    S -->|"5. SQL over Service Connect"| DB
+    S -.->|"internal call"| S2

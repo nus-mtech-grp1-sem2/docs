@@ -1,0 +1,86 @@
+%% Figure: event_inventory schema, as built (migrations 02-14). Owned by the event and inventory services.
+erDiagram
+    EVENTS ||--o{ EVENT_TEAM_MEMBERSHIPS : "staffed by"
+    EVENTS ||--o{ INVENTORY_ITEMS : offers
+    EVENTS ||--o{ SEATS : contains
+    EVENTS ||--o{ INVENTORY_HOLDS : locks
+    EVENTS ||--o| EVENT_GRID_SETTINGS : "laid out by"
+    INVENTORY_ITEMS ||--o{ SEATS : "zone of (Tier 2)"
+    INVENTORY_ITEMS ||--o{ INVENTORY_HOLDS : "reserved via (Tier 1)"
+    INVENTORY_HOLDS ||--o{ SEATS : "holds (Tier 2)"
+
+    EVENTS {
+        bigint event_id PK
+        varchar organiser_sub "Cognito sub of owner"
+        varchar title
+        text description
+        varchar venue
+        datetime starts_at "UTC"
+        int total_seats
+        int available_buyers "nullable, concurrent buyer cap"
+        enum tier "TIER1_GA, TIER2_SEATED"
+        enum status "DRAFT, PUBLISHED, CANCELLED"
+        varchar image_mime_type "nullable"
+        mediumblob image_data "nullable, event photo"
+        datetime created_at
+        datetime updated_at
+    }
+    EVENT_TEAM_MEMBERSHIPS {
+        bigint membership_id PK
+        bigint event_id FK
+        varchar user_sub "UK with event_id"
+        varchar user_email
+        enum role "ORGANISER, HELPER"
+        enum invite_status "PENDING, ACCEPTED, REJECTED"
+        varchar granted_by_sub
+        datetime granted_at
+        datetime responded_at "nullable"
+    }
+    INVENTORY_ITEMS {
+        bigint inventory_item_id PK
+        bigint event_id FK
+        varchar name "zone or tier name"
+        varchar section_code "nullable"
+        int total_qty
+        int reserved_qty "CHECK reserved+sold <= total"
+        int sold_qty
+        int price_cents
+        char color "nullable"
+        smallint grid_row "nullable"
+        smallint grid_col "nullable"
+        smallint grid_row_span
+        smallint grid_col_span
+        json layout_config "nullable"
+        int version "bumped on every change"
+        datetime created_at
+    }
+    SEATS {
+        bigint seat_id PK
+        bigint event_id FK
+        bigint inventory_item_id FK
+        varchar seat_label "UK with event_id"
+        varchar row_label "nullable"
+        smallint seat_number "nullable"
+        smallint pos_x "nullable"
+        smallint pos_y "nullable"
+        enum status "AVAILABLE, HELD, SOLD, BLOCKED"
+        enum tag "NONE, ACCESSIBLE, MAINTENANCE"
+        bigint hold_id FK "nullable"
+        datetime updated_at
+    }
+    INVENTORY_HOLDS {
+        bigint hold_id PK
+        bigint event_id FK
+        bigint inventory_item_id FK "null for seated holds"
+        varchar customer_sub
+        int quantity
+        enum status "ACTIVE, CONFIRMED, RELEASED, EXPIRED"
+        bigint order_id "logical ref checkout.orders"
+        datetime expires_at "now + 3 min"
+        datetime created_at
+    }
+    EVENT_GRID_SETTINGS {
+        bigint event_id PK "FK events"
+        smallint grid_rows
+        smallint grid_cols
+    }
