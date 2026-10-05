@@ -66,5 +66,5 @@ Table: Where the build departed from the original design
 | Frontends | 3 SPAs (Buyer, Organiser Portal, Scanner) | 1 Angular SPA with role-based workspaces | One build, one deploy, one sign-in; roles are per event, so one person often needs all three | AD-08 |
 | Messaging | 1 SQS queue (`order-events`) | 3 queues + 1 DLQ | Payment became asynchronous; admission events were added for a future push channel | AD-05, AD-19, AISS-08 |
 | Payment | Synchronous `POST /orders/{id}/payment` | Asynchronous `payment-requests` (202 + polling); synchronous endpoint kept for compatibility | Resilience to slow payment providers; load levelling of checkout | AD-05 |
-| Team removal | Soft revoke (`REVOKED` status kept for audit) | Hard delete of the membership row; invitations add `PENDING`/`ACCEPTED`/`REJECTED` | Simpler invitation model chosen during build | AISS-13 |
+| Team removal | Soft revoke (`REVOKED` status kept for audit) | Soft revoke (`REVOKED` with `revoked_at`, `revoked_by_sub`); invitations add `PENDING`/`ACCEPTED`/`REJECTED` | First built as a hard delete for a simpler invitation model; soft revoke restored so past access stays auditable (in testing) | AISS-13 |
 | Compute | ECS on EC2 with capacity providers (ADR-0001) | ECS on Fargate (ADR-0003) | EC2 networking failures (NAT instance, ENI trunking) during deployment | AD-12 |

@@ -36,7 +36,7 @@ Table: Event service endpoints
 | GET | `/events/:eventId/users` | Users who can be invited | Organiser |
 | GET | `/events/:eventId/team-members` | Team roster | Organiser |
 | PATCH | `/events/:eventId/team-members/:userSub` | Change a member's role | Event owner (organisers); Organiser (helpers) |
-| DELETE | `/events/:eventId/team-members/:userSub` | Remove a member (hard delete; cannot remove yourself) | Event owner (organisers); Organiser (helpers) |
+| DELETE | `/events/:eventId/team-members/:userSub` | Remove a member (soft revoke to `REVOKED`; cannot remove yourself) | Event owner (organisers); Organiser (helpers) |
 | POST | `/events/:eventId/invitations` | Invite a user by email as Organiser or Helper | Organiser |
 | GET | `/team-invitations` | The caller's pending invitations | Signed in |
 | POST | `/team-invitations/:membershipId/:decision` | Accept or reject an invitation | Signed in (invitee) |
