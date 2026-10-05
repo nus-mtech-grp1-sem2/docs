@@ -1,5 +1,6 @@
 {
-  "theme": "default",
+  "theme": "redux-color",
+  "look": "neo",
   "themeVariables": {
     "fontFamily": "Arial, Helvetica, sans-serif",
     "fontSize": "16px"
