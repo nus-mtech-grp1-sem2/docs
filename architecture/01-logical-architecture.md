@@ -86,7 +86,7 @@ Table: Logical architectural decisions
 
 **Decision.** `event_team_memberships` holds `(event_id, user_sub, role, invite_status)`. Creating an event inserts the creator as an accepted Organiser. Organisers invite others by email (the event service resolves the email to a Cognito user), and the invitee accepts or rejects. Every staff-only endpoint checks this table. Every other endpoint only needs a valid access token.
 
-**Trade-off and consequences.** Flexible teams, and any customer can become an organiser of their own event, which grows the platform. Each staff request costs one indexed lookup. Removal is a hard delete, so there is no audit trail of past access (AISS-13).
+**Trade-off and consequences.** Flexible teams, and any customer can become an organiser of their own event, which grows the platform. Each staff request costs one indexed lookup. Removal is a soft revoke: the row is kept as `REVOKED` with who revoked it and when, so past access stays auditable (AISS-13, in testing).
 
 ### AD-08 One SPA with role-based workspaces
 

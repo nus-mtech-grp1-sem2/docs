@@ -1,4 +1,4 @@
-%% Figure: event_inventory schema, as built (migrations 02-14). Owned by the event and inventory services.
+%% Figure: event_inventory schema, as built (checked against the live database, 2026-10-05). Owned by the event and inventory services.
 erDiagram
     EVENTS ||--o{ EVENT_TEAM_MEMBERSHIPS : "staffed by"
     EVENTS ||--o{ INVENTORY_ITEMS : offers
@@ -17,7 +17,7 @@ erDiagram
         varchar venue
         datetime starts_at "UTC"
         int total_seats
-        int available_buyers "nullable, concurrent buyer cap"
+        int available_buyers "nullable, CHECK 1..total_seats"
         enum tier "TIER1_GA, TIER2_SEATED"
         enum status "DRAFT, PUBLISHED, CANCELLED"
         varchar image_mime_type "nullable"
@@ -31,10 +31,12 @@ erDiagram
         varchar user_sub "UK with event_id"
         varchar user_email
         enum role "ORGANISER, HELPER"
-        enum invite_status "PENDING, ACCEPTED, REJECTED"
+        enum invite_status "PENDING, ACCEPTED, REJECTED, REVOKED"
         varchar granted_by_sub
         datetime granted_at
         datetime responded_at "nullable"
+        datetime revoked_at "nullable"
+        varchar revoked_by_sub "nullable"
     }
     INVENTORY_ITEMS {
         bigint inventory_item_id PK

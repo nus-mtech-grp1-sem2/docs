@@ -135,7 +135,7 @@ No retention policy deletes personal data from MySQL yet. A production deploymen
 
 **Proposed storage technology.** MySQL, next to the data they describe, so they are written in the same transaction.
 
-**Security requirements and controls.** Logs must not be editable by users; no endpoint updates or deletes them. Team membership changes are not audited: removing a member deletes the row (AISS-13).
+**Security requirements and controls.** Logs must not be editable by users; no endpoint updates or deletes them. Removing a team member keeps the row as `REVOKED` with `revoked_at` and `revoked_by_sub`, so past access stays on record (AISS-13, in testing).
 
 **Trade-off consideration.** Keeping audit rows in the operational database is simple and transactional, but they grow without bound and share the database's single point of failure.
 
