@@ -198,6 +198,7 @@ erDiagram
         enum status "ACTIVE, REVOKED"
         datetime valid_from "nullable"
         datetime valid_until "nullable"
+        datetime revoked_at "nullable"
         bigint assigned_by_user_id FK "nullable for system bootstrap"
         datetime created_at
         datetime updated_at
@@ -206,7 +207,7 @@ erDiagram
 
 `users` is a local application identity projection, not an authentication store. It contains no password, access token, refresh token, MFA secret, or Cognito client secret. A unique `cognito_sub` maps a validated Cognito identity to the internal `user_id` used by role assignments and audit records.
 
-`event_role_assignments` stores privileged, event-scoped facts. A unique `(event_id, user_id, role)` constraint allows a user to hold more than one independent role for the same event. The authorization lookup is indexed by `(user_id, event_id, status)`. An assignment is effective only when it is active and within its optional validity window.
+`event_role_assignments` stores privileged, event-scoped facts. A unique `(event_id, user_id, role)` constraint allows a user to hold more than one independent role for the same event. The authorization lookup is indexed by `(user_id, event_id, status)`. An assignment is effective only when it is active and within its optional validity window. Removing access is a soft revoke: the service changes `status` to `REVOKED` and records `revoked_at`, retaining the row for audit. Reassigning the same role reactivates that row and refreshes its grant metadata rather than inserting a duplicate. Assignment, revocation, and reactivation operations are idempotent.
 
 An authenticated active user is a Customer by default. Customer access is derived from domain ownership such as `orders.customer_sub`, `tickets.customer_sub`, or an event registration—not from a `CUSTOMER` row for every user/event combination. This avoids duplicating business facts and avoids growth proportional to every possible user/event pair.
 
