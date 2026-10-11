@@ -1,0 +1,22 @@
+%% Figure: queue schema, as built. Owned by the queue service.
+erDiagram
+    QUEUE_SESSIONS ||--o{ QUEUE_ENTRIES : contains
+    QUEUE_SESSIONS {
+        bigint queue_session_id PK
+        bigint event_id "UK, logical ref event_inventory.events"
+        datetime opens_at
+        int admission_batch_size
+        int admission_interval_sec
+        enum status "CLOSED, OPEN, DRAINED"
+    }
+    QUEUE_ENTRIES {
+        bigint queue_entry_id PK
+        bigint queue_session_id FK
+        varchar customer_sub "UK with session"
+        bigint position
+        enum status "WAITING, ADMITTED, IN_CHECKOUT, EXPIRED, LEFT"
+        datetime joined_at
+        datetime admitted_at "nullable"
+        varchar admission_token "nullable, 32 random bytes"
+        datetime token_expires_at "nullable, admitted + 600 s"
+    }

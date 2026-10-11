@@ -1,0 +1,10 @@
+%% Figure: Order lifecycle (checkout.orders.status).
+stateDiagram-v2
+    [*] --> PENDING: order created with an ACTIVE hold
+    PENDING --> PAID: worker captures mock payment
+    PENDING --> FAILED: declined token or hold expired
+    PENDING --> CANCELLED: customer cancels before paying
+    PAID --> CANCELLED: organiser cancels event (refund, paid_at kept)
+    PAID --> [*]
+    FAILED --> [*]
+    CANCELLED --> [*]

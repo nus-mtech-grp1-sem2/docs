@@ -1,0 +1,20 @@
+{
+  "theme": "redux-color",
+  "look": "neo",
+  "themeVariables": {
+    "fontFamily": "Arial, Helvetica, sans-serif",
+    "fontSize": "16px"
+  },
+  "flowchart": {
+    "htmlLabels": true,
+    "curve": "basis",
+    "wrappingWidth": 280
+  },
+  "sequence": {
+    "mirrorActors": false,
+    "wrap": true
+  },
+  "er": {
+    "layoutDirection": "TB"
+  }
+}

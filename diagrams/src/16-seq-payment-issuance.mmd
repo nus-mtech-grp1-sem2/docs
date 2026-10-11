@@ -1,0 +1,50 @@
+%% Figure: Asynchronous payment, ticket issuance and email (CU-06, CU-07).
+sequenceDiagram
+    autonumber
+    actor C as Customer
+    participant O as Order service API
+    participant PQ as SQS payment-requests
+    participant W as Payment worker (in order task)
+    participant DB as MySQL
+    participant Q as Queue service
+    participant OE as SQS order-events
+    participant T as Ticket service consumer
+    participant N as Notification service
+    participant M as Gmail SMTP
+
+    C->>O: POST /orders/77/payment-requests {paymentToken "simulated"}
+    O->>O: verify JWT, order owner, status PENDING or PAID
+    O->>PQ: PaymentRequested v1 {orderId, customerSub}, delay 7 s
+    O-->>C: 202 PROCESSING
+    loop every 2 s, up to 30 polls
+        C->>O: GET /orders/77
+    end
+    PQ->>W: long poll (20 s), visibility 60 s
+    W->>DB: BEGIN, SELECT order FOR UPDATE
+    alt order already PAID (duplicate delivery)
+        W->>DB: COMMIT, re-publish OrderPaid only (no second capture)
+    else hold ACTIVE and not expired
+        W->>DB: SELECT hold FOR UPDATE
+        W->>DB: seats HELD to SOLD (row count must equal quantity)<br/>or reserved_qty to sold_qty for Tier 1
+        W->>DB: hold CONFIRMED, INSERT payment CAPTURED, order PAID
+        W->>DB: queue entry LEFT, COMMIT
+        W->>Q: POST /events/42/queue/admit-next (x-internal-token, 1 s timeout)
+        W->>OE: OrderPaid v1, delay 10 s
+    else hold expired
+        W->>DB: release hold, order FAILED, COMMIT
+    end
+    W->>PQ: delete message
+    Note over PQ: After 5 failed receives the message moves to the DLQ<br/>and the CloudWatch alarm fires
+    OE->>T: long poll, up to 10 messages
+    T->>DB: GET_LOCK("ticket-order-77"), BEGIN
+    T->>DB: SELECT existing tickets FOR UPDATE, INSERT missing ones (random qr_token)
+    T->>DB: COMMIT, RELEASE_LOCK
+    T->>OE: delete message
+    T-)N: POST /notifications/order-confirmation (fire and forget)
+    loop each ticket
+        N->>DB: skip if this ticket already SENT
+        N->>M: send email with this ticket's QR code
+        N->>DB: record SENT or FAILED (unique on ticket_id)
+    end
+    C->>T: GET /customers/me/tickets (polled every 5 s)
+    Note over T,DB: Reconciliation sweep in the ticket service issues tickets<br/>for any PAID order the consumer missed

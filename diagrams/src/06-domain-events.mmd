@@ -1,0 +1,24 @@
+%% Figure: Domain events and choreography. Thick arrows are SQS messages; dashed arrows are synchronous HTTP.
+flowchart TB
+    C(["Customer (SPA)"])
+    subgraph OrderSvc["Order service task"]
+        direction LR
+        ORD["API"]
+        W["Payment worker"]
+    end
+    PR{{"payment-requests<br/>delay 7 s, DLQ after 5 receives"}}
+    OE{{"order-events<br/>delay 10 s"}}
+    TKT["Ticket service<br/>OrderPaid consumer"]
+    NTF["Notification service"]
+    Q["Queue service<br/>admission scheduler"]
+    CA{{"customer-admitted<br/>(no consumer yet)"}}
+
+    C -.->|"POST payment-requests; 202"| ORD
+    C -.->|"poll GET /orders/:id every 2 s"| ORD
+    ORD ==>|"PaymentRequested v1 (command)"| PR
+    PR ==> W
+    W ==>|"OrderPaid v1 (event)"| OE
+    W -.->|"admit-next: refill the freed slot"| Q
+    OE ==> TKT
+    TKT -.->|"POST order-confirmation"| NTF
+    Q ==>|"CustomerAdmitted v1 (event)"| CA

@@ -1,0 +1,29 @@
+%% Figure: Door check-in (EH-01 to EH-04).
+sequenceDiagram
+    autonumber
+    actor H as Helper
+    participant SPA as SPA check-in screen
+    participant T as Ticket service
+    participant DB as MySQL
+
+    H->>SPA: open check-in for event 42
+    SPA->>T: POST /scanner/sessions {eventId 42} (Cognito JWT)
+    T->>DB: event exists, not CANCELLED
+    T->>DB: membership HELPER or ORGANISER, invite ACCEPTED
+    T-->>SPA: HMAC-SHA256 signed session token (event-scoped, expires)
+    H->>SPA: scan QR (camera or image upload)
+    SPA->>T: POST /tickets/validate {qrToken} (scanner session)
+    T->>DB: BEGIN, SELECT ticket BY qr_token FOR UPDATE
+    alt no such ticket
+        T->>DB: INSERT check_in_logs INVALID (attempted token)
+    else ticket for another event
+        T->>DB: INSERT check_in_logs WRONG_EVENT
+    else status ISSUED
+        T->>DB: UPDATE status CHECKED_IN, checked_in_by
+        T->>DB: INSERT check_in_logs SUCCESS
+    else already CHECKED_IN or VOID
+        T->>DB: INSERT check_in_logs DUPLICATE or INVALID
+    end
+    T->>DB: COMMIT
+    T-->>SPA: result + ticket summary
+    SPA-->>H: green / amber / red result screen

@@ -1,5 +1,7 @@
 # OneStage — System Design
 
+> **Archived: original design, August 2026.** This document records the design as first planned. The system as built differs in several ways (see `architecture/00-overview.md`, "Original design versus the system as built"). For the current design, read `architecture/`. Kept unchanged below as a historical record.
+
 *SWE5001 — Architecting Scalable Systems, Graduate Certificate in Architecting Scalable Systems (NUS–ISS)*
 
 Data models, domain class diagrams, and API surface for the six backend services, derived from the [user stories](https://claude.ai/code/artifact/7a3e1db9-56dc-4d3f-8bc1-3c5d870a97a2). One Amazon RDS for MySQL instance plays five independent databases via schema-per-service; Cognito owns user authentication and credentials; the stateless Authentication Service validates the browser-to-backend identity flow; the Authorization Policy Engine owns application authorization; and a single SQS queue carries the one hand-off that can safely be asynchronous.
