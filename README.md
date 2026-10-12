@@ -21,6 +21,7 @@ Design documentation for OneStage, the SWE5001 (Architecting Scalable Systems, N
 | `scripts/export-docx.sh` | | Builds `build/OneStage-Architecture.docx` with the report template's styles (Docker, python3) |
 | `onestage-user-stories.md` | 1.4 Project Scope | The 27 user stories and use-case diagrams (requirements baseline) |
 | `archive/` | | The original August 2026 system design and BCE diagrams, kept as a historical record |
+| `media/` | | The demo video, split into parts under GitHub's 100 MB limit; `media/README.md` explains how to rejoin them |
 
 The project proposal (`SWE5001_project_proposal.docx`) is the record of the initial plan and is not updated.
 
