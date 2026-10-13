@@ -15,6 +15,8 @@ Design documentation for OneStage, the SWE5001 (Architecting Scalable Systems, N
 | `architecture/06-other-decisions.md` | 3.3 Other Architectural Decisions | AD-23 to AD-30 |
 | `architecture/07-architectural-limitations.md` | 3.4 Architectural Limitation | AISS-01 to AISS-14 |
 | `architecture/08-api-catalogue.md` | Appendix | Every HTTP endpoint and message contract |
+| `performance-testing/k6/2026-10-11-grafana-cloud-results.md` | 4 Quality Attributes | Deployed read-only Grafana Cloud k6 evidence |
+| `performance-testing/buyer-workflow/2026-10-13-buyer-workflow-capacity-results.md` | 4 Quality Attributes | Stage-by-stage (B), end-to-end (A) and browser-overlay (D) evidence |
 | `diagrams/src/*.mmd` | | Mermaid sources, one per figure; the file number is the figure number |
 | `diagrams/rendered/*.png` | | Rendered figures, used by both the markdown and the docx |
 | `scripts/render-diagrams.sh` | | Re-renders the figures (Docker) |
@@ -35,7 +37,7 @@ The architecture chapter reflects the code and infrastructure on 4 October 2026:
 
 Statements about behaviour come from reading the code, the database migrations, `kong.yml` and Terraform, not from the original design. When the system changes, update the affected section and the original-versus-as-built table in `00-overview.md`.
 
-Not covered yet: report chapter 4 (Quality Attributes; performance needs the load-test results) and chapter 5 (DevOps and Development Lifecycle).
+Not integrated into the generated report yet: chapter 4 (Quality Attributes) and chapter 5 (DevOps and Development Lifecycle). The captured performance evidence is available under `performance-testing/`.
 
 ## Writing conventions (keep these so the docx export stays clean)
 
