@@ -50,7 +50,7 @@ Table: Logical architectural decisions
 
 **Decision.** Every event sells through the queue.
 
-- **Opening.** Publishing is the only step needed. The first `POST /queue/join` for a published event that has not started creates its queue session (`OPEN`, interval 60 s, batch size from the buyer cap). A `CLOSED` session opens on the next join. The opening time and admission rate that `PUT /queue/config` still accepts no longer gate anything, and the SPA does not call it.
+- **Opening.** Publishing is the only step needed. The first `POST /queue/join` for a published event that has not started creates its queue session (`OPEN`, interval 60 s, batch size from the buyer cap). A `CLOSED` session opens on the next join. `PUT /queue/config` is still in the API but the SPA does not call it. Of its settings, the batch size is ignored (a batch always follows the buyer cap), the interval still applies, and a future opening time no longer stops buyers joining but does hold back automatic admission until it passes (AISS-12).
 - **Admission.** A scheduler in the queue service checks every second and admits the next batch once the interval since the last admission has passed. A batch is bounded by the concurrent-buyer cap (`available_buyers`, or 10% of total capacity, minimum 1) minus buyers already admitted or in checkout, and by the tickets still available. When nothing is left the session becomes `DRAINED`. Organisers tune only the buyer cap, and can change it while the event is on sale (`PUT /events/{id}/available-buyers`).
 - **Admission token.** Each admitted buyer gets a random token valid for 600 seconds. The SPA shows ticket selection only to an admitted buyer, and `POST /orders` checks the token under a row lock for both tiers, then moves the entry to `IN_CHECKOUT`. An order without a live token is refused with `403 queue_admission_required`.
 - **Refill.** When an admitted buyer leaves, or when an order is paid, fails or is cancelled, the freed slot is refilled at once, without waiting for the interval.
@@ -62,7 +62,7 @@ Table: Logical architectural decisions
 
 - Every buyer passes through the queue, even for an 8-seat workshop. When demand is low the first buyer is admitted within about a second, but a buyer who arrives just after an admission can wait up to the 60 s interval even when buyer slots are free (AISS-16).
 - Polling. With 40,000 buyers polling every 3 s, Little's Law gives about 13,300 requests/s on `/queue/me`, which makes the poll endpoint the likely scaling limit (see AISS-02 and the Performance chapter).
-- Organisers lost control of the on-sale time and admission rate that OR-04 asks for, and estimated wait time (CU-05) is not shown yet (AISS-14).
+- In the app, organisers lost control of the on-sale time and admission rate that OR-04 asks for, and estimated wait time (CU-05) is not shown yet (AISS-14).
 
 ### AD-04 One database server, schema per service, local transactions across the inventory domain
 

@@ -67,11 +67,11 @@ Table: Queue service endpoints
 | Method | Path | Purpose | Caller |
 |---|---|---|---|
 | GET | `/events/:eventId/queue` | Queue status and waiting count (404 until the first join); also sets the session `OPEN` or `CLOSED` from the event's status and start time | Public |
-| PUT | `/events/:eventId/queue/config` | Set opening time, batch size and interval. Kept for compatibility: the SPA does not call it, and the opening time no longer gates joining (AISS-12) | Organiser |
+| PUT | `/events/:eventId/queue/config` | Set opening time, batch size and interval. Not called by the SPA. The batch size is ignored (the buyer cap applies); the interval applies; a future opening time does not block joins but holds back automatic admission (AISS-12) | Organiser |
 | POST | `/events/:eventId/queue/join` | Join the queue of a published event, either tier; the first join creates the session | Signed in |
 | GET | `/events/:eventId/queue/me` | My position, status and admission token (polled every 3 s) | Signed in |
 | DELETE | `/events/:eventId/queue/me` | Leave the queue or release an admitted place (refused once in checkout) | Signed in |
-| POST | `/events/:eventId/queue/admit-next` | Admit the next batch now | Organiser, or Internal (`x-internal-token`, used by the order service) |
+| POST | `/events/:eventId/queue/admit-next` | Admit the next batch. An organiser's call respects the admission interval (`429` until it passes); the order service's refill bypasses it. The organiser app no longer offers this | Organiser, or Internal (`x-internal-token`, used by the order service) |
 
 ## Order service (`/api/order`)
 
