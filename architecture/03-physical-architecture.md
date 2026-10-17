@@ -58,7 +58,7 @@ Table: Security groups
 
 ### AD-16 Kong DB-less as the API gateway
 
-**Decision.** Kong runs as its own ECS service (1–4 tasks) and is the only target of the ALB, which health-checks Kong's status port 8100. The declarative `kong.yml` defines one route per service (`/api/<service>`, prefix stripped), method-matched write routes for the queue and order services that carry the `rate-limiting` plugin (AD-11), and a global `correlation-id` plugin that adds `X-Request-Id`.
+**Decision.** Kong runs as its own ECS service (1–4 tasks) and is the only target of the ALB, which health-checks Kong's status port 8100. The declarative `kong.yml` defines one route per public service (`/api/<service>`, prefix stripped; the notification service has no route and is reachable only over Service Connect), method-matched write routes for the queue and order services that carry the `rate-limiting` plugin (AD-11), and a global `correlation-id` plugin that adds `X-Request-Id`.
 
 **Alternatives.** ALB path rules cannot rate-limit or add correlation ids. Amazon API Gateway would add per-request cost and a second edge in front of CloudFront.
 

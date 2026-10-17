@@ -1,0 +1,28 @@
+%% Figure: Buyer journey in the SPA, the same for general admission (Tier 1) and seated (Tier 2) events.
+flowchart TB
+    START(["Customer browses Home or Events"]) --> PEND{"Unpaid order for<br/>this event still held?"}
+    PEND -->|yes| PAY
+    PEND -->|no| QPAGE["/events/:id → /events/:id/queue<br/>sign-in required (return URL kept)"]
+
+    QPAGE --> JOIN["POST /queue/join<br/>first join creates the event's queue;<br/>rejoining keeps a live place"]
+    JOIN -->|"event not on sale or started"| NOSALE(["Not on sale: back to Events"])
+    JOIN -->|"queue DRAINED"| SOLD(["Sold out: back to Events"])
+    JOIN --> WAIT["WAITING: position shown,<br/>polled every 3 s"]
+
+    WAIT -. "customer browses away" .-> PLACES["Your active bookings panel<br/>(Home, Events, My events):<br/>one card per queue place, polled every 5 s,<br/>return or release; places in several<br/>queues at once"]
+    PLACES -. "return" .-> WAIT
+    WAIT -->|"leave or release"| LEFT(["LEFT"])
+    WAIT -->|"scheduler admits a batch"| ADM["ADMITTED: token valid 600 s"]
+
+    ADM --> TICKETS["/events/:id/tickets<br/>(admission guard; countdown shown)"]
+    TICKETS --> SEL{"Event tier"}
+    SEL -->|"Tier 1"| GA["Pick a section on the zone map<br/>and a quantity (1 to 50)"]
+    SEL -->|"Tier 2"| SEAT["Pick seats on the seat map<br/>(1 to 50)"]
+    GA --> ORDER["POST /orders with the admission token"]
+    SEAT --> ORDER
+
+    ORDER -->|"403 token expired"| QPAGE
+    ORDER -->|"409 unavailable"| TICKETS
+    ORDER -->|"201 PENDING, hold 3 min"| PAY["/checkout/:orderId<br/>entry IN_CHECKOUT; mock card;<br/>202, then poll every 2 s"]
+    PAY -->|PAID| MINE(["My events: QR tickets appear (seat or<br/>GA section number such as A12); email sent"])
+    PAY -->|"hold expired or cancelled"| FREE(["Slot freed and refilled for the next buyer"])

@@ -1,6 +1,6 @@
 # Appendix: API Catalogue
 
-Every business endpoint as built on 4 October 2026, taken from the Express routes in `backend-repo: services/*/src`. Clients call `https://<distribution>/api/<service><path>`: CloudFront forwards `/api/*` to the ALB, and Kong strips `/api/<service>` before forwarding. Every service also answers `GET /health`.
+Every business endpoint as built on 17 October 2026, taken from the Express routes in `backend-repo: services/*/src`. Clients call `https://<distribution>/api/<service><path>`: CloudFront forwards `/api/*` to the ALB, and Kong strips `/api/<service>` before forwarding. Every service also answers `GET /health`.
 
 **Caller and authorisation**:
 - **Public**: no token needed.
@@ -10,6 +10,7 @@ Every business endpoint as built on 4 October 2026, taken from the Express route
 - **Event owner**: the event's creator.
 - **Scanner session**: the HMAC-signed, event-scoped session from `POST /scanner/sessions`.
 - **Internal**: service-to-service only, using a shared secret header.
+- **Admitted**: the caller's queue entry for the event is `ADMITTED` with an unexpired admission token, sent in the request body.
 
 POST routes on `queue` and `order` are rate limited at Kong to 60 per minute per client IP.
 
@@ -27,7 +28,8 @@ Table: Event service endpoints
 | GET | `/events/manage` | Events the caller organises | Signed in |
 | GET | `/helper/shifts` | Events the caller helps at | Signed in |
 | POST | `/events` | Create a draft event; creator becomes Organiser | Signed in |
-| PUT | `/events/:eventId` | Edit event details | Organiser |
+| PUT | `/events/:eventId` | Edit a draft's details; changing the tier clears its inventory (refused once anything is reserved or sold) | Organiser |
+| PUT | `/events/:eventId/available-buyers` | Set how many buyers the queue admits at once; allowed while on sale, until the event starts | Organiser |
 | PUT | `/events/:eventId/image` | Upload the event photo | Organiser |
 | POST | `/events/:eventId/publish` | Publish | Organiser |
 | GET | `/events/:eventId/cancellation-impact` | Tickets and buyers a cancel would affect | Organiser |
@@ -48,9 +50,11 @@ Table: Inventory service endpoints
 | Method | Path | Purpose | Caller |
 |---|---|---|---|
 | GET | `/events/:eventId/seats` | Seat map with layout data | Signed in |
-| GET | `/events/:eventId/zones` | Zones (inventory items) with availability | Signed in |
+| GET | `/events/:eventId/zones` | Zones (sections) with availability, grid position and stage pieces | Signed in |
 | GET | `/events/:eventId/inventory` | Full inventory configuration | Organiser |
-| PUT | `/events/:eventId/inventory` | Configure zones, grid and seats (cannot shrink below reserved or sold) | Organiser |
+| PUT | `/events/:eventId/inventory` | Configure zones, grid and seats (cannot shrink below reserved or sold; seated maps at most 400 seats; general-admission sections take an explicit quantity) | Organiser |
+| PUT | `/events/:eventId/stage` | Replace the stage layout (up to 5 pieces, not overlapping zones) | Organiser |
+| PATCH | `/events/:eventId/seats` | Switch up to 10,000 seats on (`AVAILABLE`) or off (`BLOCKED`) in one request | Organiser |
 | PATCH | `/events/:eventId/seats/:seatId` | Block, unblock or tag a seat | Organiser |
 | POST | `/events/:eventId/holds` | Create a hold directly (not used by the SPA; see AISS-12) | Signed in |
 | POST | `/holds/:holdId/release` | Release a hold (not used by the SPA) | Owner |
@@ -62,12 +66,12 @@ Table: Queue service endpoints
 
 | Method | Path | Purpose | Caller |
 |---|---|---|---|
-| GET | `/events/:eventId/queue` | Queue status and waiting count; also opens a `CLOSED` session once `opens_at` has passed | Public |
-| PUT | `/events/:eventId/queue/config` | Set opening time, batch size and interval | Organiser |
-| POST | `/events/:eventId/queue/join` | Join the waiting room | Signed in |
+| GET | `/events/:eventId/queue` | Queue status and waiting count (404 until the first join); also sets the session `OPEN` or `CLOSED` from the event's status and start time | Public |
+| PUT | `/events/:eventId/queue/config` | Set opening time, batch size and interval. Not called by the SPA. The batch size is ignored (the buyer cap applies); the interval applies; a future opening time does not block joins but holds back automatic admission (AISS-12) | Organiser |
+| POST | `/events/:eventId/queue/join` | Join the queue of a published event, either tier; the first join creates the session | Signed in |
 | GET | `/events/:eventId/queue/me` | My position, status and admission token (polled every 3 s) | Signed in |
-| DELETE | `/events/:eventId/queue/me` | Leave the queue | Signed in |
-| POST | `/events/:eventId/queue/admit-next` | Admit the next batch now | Organiser, or Internal (`x-internal-token`, used by the order service) |
+| DELETE | `/events/:eventId/queue/me` | Leave the queue or release an admitted place (refused once in checkout) | Signed in |
+| POST | `/events/:eventId/queue/admit-next` | Admit the next batch. An organiser's call respects the admission interval (`429` until it passes); the order service's refill bypasses it. The organiser app no longer offers this | Organiser, or Internal (`x-internal-token`, used by the order service) |
 
 ## Order service (`/api/order`)
 
@@ -75,7 +79,7 @@ Table: Order service endpoints
 
 | Method | Path | Purpose | Caller |
 |---|---|---|---|
-| POST | `/orders` | Reserve seats or quantity and create a `PENDING` order in one transaction | Signed in (Tier 2 needs a valid admission token) |
+| POST | `/orders` | Reserve seats or a quantity (at most 50 tickets) and create a `PENDING` order in one transaction | Admitted (both tiers) |
 | POST | `/orders/:orderId/payment-requests` | Queue a mock payment; answers 202 | Owner |
 | POST | `/orders/:orderId/payment` | Synchronous mock payment (kept for compatibility) | Owner |
 | GET | `/orders/:orderId` | Order detail and status (polled during payment) | Owner or Organiser |
@@ -90,7 +94,7 @@ Table: Ticket service endpoints
 
 | Method | Path | Purpose | Caller |
 |---|---|---|---|
-| GET | `/customers/me/tickets` | My tickets with QR data (polled every 5 s after payment) | Signed in |
+| GET | `/customers/me/tickets` | My tickets with QR data and seat label (a real seat, or a general-admission section number such as A12); polled every 5 s after payment | Signed in |
 | GET | `/customers/me/orders/:orderId/confirmation` | Ticket and email status for one order | Owner |
 | GET | `/tickets/:ticketId` | Ticket detail | Owner |
 | POST | `/scanner/sessions` | Start an event-scoped scanner session | Helper or Organiser |
@@ -102,17 +106,17 @@ Table: Ticket service endpoints
 | GET | `/events/:eventId/orders/summary` | Sales summary (duplicate of the order service's; not used by the SPA) | Organiser |
 | POST | `/internal/orders/:orderId/issue-tickets` | Issue tickets directly (local fallback when SQS is not configured; disabled in AWS) | Internal (`x-ticket-internal-secret`) |
 
-`GET /customers/me/tickets` is registered twice in the ticket service; Express uses the first registration.
+## Notification service (internal only)
 
-## Notification service (`/api/notification`)
+The notification service has no Kong route: it is reachable only over Service Connect, at `http://notification:3006`. Every `/notifications/*` route requires `INTERNAL_API_TOKEN` in the `x-internal-token` header and answers 401 without it (AISS-03, resolved).
 
 Table: Notification service endpoints
 
-| Method | Path | Purpose | Caller (intended) | Check today |
-|---|---|---|---|---|
-| POST | `/notifications/order-confirmation` | Send one email per ticket; idempotent per ticket | Internal (ticket service) | **None** (AISS-03) |
-| POST | `/notifications/event-cancellation` | Send a cancellation email for one order | Internal (ticket service) | **None** (AISS-03) |
-| GET | `/notifications/:orderId` | Delivery records for an order | Internal | **None** (AISS-03) |
+| Method | Path | Purpose | Caller |
+|---|---|---|---|
+| POST | `/notifications/order-confirmation` | Send one email per ticket; idempotent per ticket | Internal (ticket service) |
+| POST | `/notifications/event-cancellation` | Send a cancellation email for one order | Internal (ticket service) |
+| GET | `/notifications/:orderId` | Delivery records for an order | Internal |
 
 ## Auth service (`/api/auth`)
 

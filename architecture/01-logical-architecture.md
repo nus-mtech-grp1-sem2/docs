@@ -14,7 +14,7 @@ Table: Logical architectural decisions
 |---|---|
 | AD-01 | Decompose the backend into one microservice per bounded context (event, inventory, queue, order, ticket, notification) behind a single API gateway, built from one shared code base and container image. Trade-off: independent deployment and scaling against more moving parts to operate |
 | AD-02 | Keep the correctness-critical path (reserve, then capture) synchronous and lock-based, and make everything after a successful capture asynchronous. Trade-off: guaranteed no-oversell against lower throughput on contended rows |
-| AD-03 | Put a virtual waiting room in front of Tier 2 (seated) on-sales only, admitting buyers in batches bounded by a concurrent-buyer cap and by the seats left, with short-lived admission tokens. Trade-off: fairness and load levelling against added wait time |
+| AD-03 | Put a virtual queue in front of every on-sale, general admission (Tier 1) and seated (Tier 2) alike. The queue opens when the event is published and is created by the first buyer to join. Buyers are admitted in batches bounded by a concurrent-buyer cap and by the tickets left, and only an admitted buyer with a short-lived token can choose tickets or order. Trade-off: one fair, load-levelled purchase path for every event against a queue step even when demand is low |
 | AD-04 | Use one relational database server with one schema per service, but allow the order service to read and write `event_inventory` and `queue` tables inside its own transactions. Trade-off: one local ACID transaction instead of a distributed one, against data-layer coupling (AISS-01) |
 | AD-05 | Process payment asynchronously through a command queue with a dead-letter queue and an idempotent capture, answering `202 Accepted` and letting the client poll. Keep the synchronous endpoint for older clients. Trade-off: resilience and load levelling against a polling user experience |
 | AD-06 | Issue tickets by choreography: the order service publishes `OrderPaid`, and the ticket service consumes it idempotently, with a reconciliation sweep as a safety net. Trade-off: decoupled, retryable issuance against a delay of about 10–20 s before tickets appear |
@@ -42,17 +42,27 @@ Table: Logical architectural decisions
 
 **Alternatives.** Optimistic concurrency alone (version check and retry) behaves badly when hundreds of buyers want the same seat, because most retries fail. A saga across separate inventory and order databases needs compensation logic and allows windows of inconsistency.
 
-**Trade-off and consequences.** No oversell by construction, and it is easy to explain and test (an end-to-end test runs two customers against one seat). Throughput on a single hot row is bounded by lock hold time, which is why the waiting room (AD-03) limits how many buyers reach this path at once.
+**Trade-off and consequences.** No oversell by construction, and it is easy to explain and test (an end-to-end test runs two customers against one seat). Throughput on a single hot row is bounded by lock hold time, which is why the queue (AD-03) limits how many buyers reach this path at once.
 
-### AD-03 Virtual waiting room for Tier 2 on-sales
+### AD-03 Virtual queue for every on-sale
 
-**Context.** A popular seated on-sale can draw far more buyers than seats in the first minute. Letting all of them hit checkout would saturate the database and lock contention would turn into errors.
+**Context.** A popular on-sale can draw far more buyers than tickets in the first minute, whether the event is seated or general admission. Letting all of them hit checkout would saturate the database, and lock contention would turn into errors. The first build queued only seated events, and the organiser had to configure an opening time before anyone could join. That gave two purchase paths to protect and test, left a popular general-admission event with no load levelling, and left a published event unbuyable until its queue was set up.
 
-**Decision.** Tier 2 events have a queue session. Buyers join and poll their position. A scheduler in the queue service admits the next batch when the admission interval has elapsed. A batch is bounded by the concurrent-buyer cap (`available_buyers`, default 10% of total seats, minimum 1) minus buyers already admitted, and by the seats still available. Each admitted buyer gets a random admission token valid for 600 seconds, which `POST /orders` checks under a row lock. When a buyer pays, fails or cancels, the order service asks the queue to refill the slot at once. Tier 1 events skip the queue.
+**Decision.** Every event sells through the queue.
 
-**Alternatives.** Rate limiting alone sheds load but is unfair (whoever retries fastest wins). A managed waiting room product would add cost and an external dependency.
+- **Opening.** Publishing is the only step needed. The first `POST /queue/join` for a published event that has not started creates its queue session (`OPEN`, interval 60 s, batch size from the buyer cap). A `CLOSED` session opens on the next join. `PUT /queue/config` is still in the API but the SPA does not call it. Of its settings, the batch size is ignored (a batch always follows the buyer cap), the interval still applies, and a future opening time no longer stops buyers joining but does hold back automatic admission until it passes (AISS-12).
+- **Admission.** A scheduler in the queue service checks every second and admits the next batch once the interval since the last admission has passed. A batch is bounded by the concurrent-buyer cap (`available_buyers`, or 10% of total capacity, minimum 1) minus buyers already admitted or in checkout, and by the tickets still available. When nothing is left the session becomes `DRAINED`. Organisers tune only the buyer cap, and can change it while the event is on sale (`PUT /events/{id}/available-buyers`).
+- **Admission token.** Each admitted buyer gets a random token valid for 600 seconds. The SPA shows ticket selection only to an admitted buyer, and `POST /orders` checks the token under a row lock for both tiers, then moves the entry to `IN_CHECKOUT`. An order without a live token is refused with `403 queue_admission_required`.
+- **Refill.** When an admitted buyer leaves, or when an order is paid, fails or is cancelled, the freed slot is refilled at once, without waiting for the interval.
+- **Several queues at once.** A buyer may hold a place in the queues of several events at the same time. Each place is independent and expires on its own.
 
-**Trade-off and consequences.** This is queue-based load levelling: the arrival spike is absorbed by cheap position polls, while the checkout path sees a steady, bounded rate. Polling is the cost. With 40,000 buyers polling every 3 s, Little's Law gives about 13,300 requests/s on `/queue/me`, which makes the poll endpoint the likely scaling limit (see AISS-02 and the Performance chapter). Estimated wait time (CU-05) is not shown yet (AISS-14).
+**Alternatives.** Rate limiting alone sheds load but is unfair (whoever retries fastest wins). A managed waiting room product would add cost and an external dependency. Queuing only seated or high-demand events, as first built, keeps small events faster but needs a second purchase path and a judgement, per event, about demand that organisers cannot make reliably.
+
+**Trade-off and consequences.** This is queue-based load levelling: the arrival spike is absorbed by cheap position polls, while the checkout path sees a steady, bounded rate. There is now one purchase path to secure and test. The costs:
+
+- Every buyer passes through the queue, even for an 8-seat workshop. When demand is low the first buyer is admitted within about a second, but a buyer who arrives just after an admission can wait up to the 60 s interval even when buyer slots are free (AISS-16).
+- Polling. With 40,000 buyers polling every 3 s, Little's Law gives about 13,300 requests/s on `/queue/me`, which makes the poll endpoint the likely scaling limit (see AISS-02 and the Performance chapter).
+- In the app, organisers lost control of the on-sale time and admission rate that OR-04 asks for, and estimated wait time (CU-05) is not shown yet (AISS-14).
 
 ### AD-04 One database server, schema per service, local transactions across the inventory domain
 

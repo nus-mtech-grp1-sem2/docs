@@ -11,9 +11,9 @@ Design documentation for OneStage, the SWE5001 (Architecting Scalable Systems, N
 | `architecture/02-platform-design.md` | 3.1.4 Platform Design | Seed, producers, consumers; bounded contexts; context map; aggregates; domain events |
 | `architecture/03-physical-architecture.md` | 3.2, 3.2.1–3.2.2 | AD-12 to AD-22, physical detail deployment diagram, technology and services |
 | `architecture/04-persistence-design.md` | 3.2.3 Persistence Design | Schemas, ERDs, cross-schema access, concurrency, retention, data groups |
-| `architecture/05-detailed-design.md` | 3.2.4 Detailed Design | Tier 2 purchase under contention; asynchronous payment and issuance; door check-in |
+| `architecture/05-detailed-design.md` | 3.2.4 Detailed Design | Buyer journey for both tiers; seated purchase under contention; asynchronous payment and issuance; door check-in |
 | `architecture/06-other-decisions.md` | 3.3 Other Architectural Decisions | AD-23 to AD-30 |
-| `architecture/07-architectural-limitations.md` | 3.4 Architectural Limitation | AISS-01 to AISS-14 |
+| `architecture/07-architectural-limitations.md` | 3.4 Architectural Limitation | AISS-01 to AISS-17 |
 | `architecture/08-api-catalogue.md` | Appendix | Every HTTP endpoint and message contract |
 | `performance-testing/k6/2026-10-11-grafana-cloud-results.md` | 4 Quality Attributes | Deployed read-only Grafana Cloud k6 evidence |
 | `performance-testing/buyer-workflow/2026-10-13-buyer-workflow-capacity-results.md` | 4 Quality Attributes | Stage-by-stage (B), end-to-end (A) and browser-overlay (D) evidence |
@@ -29,10 +29,10 @@ The project proposal (`SWE5001_project_proposal.docx`) is the record of the init
 
 ## Status and sources
 
-The architecture chapter reflects the code and infrastructure on 4 October 2026:
+The architecture chapter reflects the code and infrastructure on 17 October 2026:
 
-- `backend-repo` at `8f607c7`
-- `core-frontend` at `225f297`
+- `backend-repo` at `e62ba78`
+- `core-frontend` at `a1e77e1`
 - ADRs 0001–0003 in `onestage-ai-engineering`
 
 Statements about behaviour come from reading the code, the database migrations, `kong.yml` and Terraform, not from the original design. When the system changes, update the affected section and the original-versus-as-built table in `00-overview.md`.

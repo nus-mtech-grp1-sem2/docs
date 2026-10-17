@@ -1,0 +1,14 @@
+%% Figure: Queue entry lifecycle (queue.queue_entries.status), both tiers.
+stateDiagram-v2
+    [*] --> WAITING: join (first join creates the session)
+    WAITING --> ADMITTED: admission batch (token, 600 s TTL)
+    WAITING --> LEFT: customer leaves or releases the place
+    ADMITTED --> IN_CHECKOUT: order created (token TTL aligned to hold)
+    ADMITTED --> LEFT: customer releases the place (slot refilled)
+    ADMITTED --> EXPIRED: token not used in time
+    IN_CHECKOUT --> LEFT: paid, failed or cancelled (slot refilled)
+    IN_CHECKOUT --> EXPIRED: hold and token expired
+    LEFT --> WAITING: rejoin (new position at the back)
+    EXPIRED --> WAITING: rejoin (new position at the back)
+    LEFT --> [*]
+    EXPIRED --> [*]

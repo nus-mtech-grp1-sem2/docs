@@ -1,6 +1,6 @@
 # Persistence Design
 
-All durable business data lives in one MySQL 8.0 server (InnoDB, `utf8mb4`, UTC timestamps) with one schema per bounded context. Messages in flight live in SQS. Logs live in CloudWatch Logs and S3. The SPA keeps only the user's tokens and a pending order id in browser storage.
+All durable business data lives in one MySQL 8.0 server (InnoDB, `utf8mb4`, UTC timestamps) with one schema per bounded context. Messages in flight live in SQS. Logs live in CloudWatch Logs and S3. The SPA keeps only the user's tokens, a pending order id and the ids of events whose queues the user is in (never admission tokens) in browser storage.
 
 ## Schemas and ownership
 
@@ -9,9 +9,9 @@ Table: Schemas
 | Schema | Owning service(s) | Tables | Purpose |
 |---|---|---|---|
 | `event_inventory` | event, inventory | `events`, `event_team_memberships`, `inventory_items`, `seats`, `inventory_holds`, `event_grid_settings` | Events, teams, sellable inventory and holds |
-| `queue` | queue | `queue_sessions`, `queue_entries` | Waiting rooms |
+| `queue` | queue | `queue_sessions`, `queue_entries` | One queue per event, for both tiers |
 | `checkout` | order | `orders`, `order_items`, `payments` | Orders and mock payments |
-| `ticketing` | ticket | `tickets`, `check_in_logs` | Tickets and every scan attempt |
+| `ticketing` | ticket | `tickets`, `check_in_logs`, `ga_section_counters` | Tickets, general-admission section numbering and every scan attempt |
 | `notification` | notification | `email_notifications` | Email delivery records |
 
 Every service connects as the same database user (`onestage_app`), which has full privileges on all five schemas. Ownership is a code convention, not a database permission (AISS-01).
@@ -22,7 +22,9 @@ Every service connects as the same database user (`onestage_app`), which has ful
 
 ## Logical data model
 
-The diagrams below are drawn from the live migrations `02` to `16` in `backend-repo: database/`.
+The diagrams below are drawn from the live migrations `02` to `19` in `backend-repo: database/`.
+
+**Stage pieces.** The seat-map editor stores the stage as up to five rows in `inventory_items` named `__STAGE__`, with zero capacity and price. Services that list zones filter them out by name (AISS-17).
 
 ![Figure 9. `event_inventory` schema](../diagrams/rendered/09-erd-event-inventory.png)
 
@@ -56,17 +58,18 @@ Table: Concurrency control on the write paths that can race
 
 | Operation | Service | Rows locked (in order) | Guard against races |
 |---|---|---|---|
-| Reserve and create order, Tier 2 | order | queue entry (admission token); seats in `seat_id` order | All requested seats must be `AVAILABLE` under the lock, else 409 |
-| Reserve and create order, Tier 1 | order | all inventory items of the event | Picks a zone with enough capacity; `CHECK (reserved_qty + sold_qty <= total_qty)` |
+| Reserve and create order, Tier 2 | order | queue entry (admission token); seats in `seat_id` order | Token must be live, else 403; all requested seats must be `AVAILABLE` under the lock, else 409 |
+| Reserve and create order, Tier 1 | order | queue entry (admission token); all inventory items of the event | Token must be live, else 403; picks the chosen section or one with enough capacity; `CHECK (reserved_qty + sold_qty <= total_qty)` |
 | Reserve with an existing hold | order | the hold | Owner check; hold must be `ACTIVE` and unexpired; one order per hold (`uq_orders_hold`) |
 | Capture payment | order worker | order, then hold | `PAID` orders are not captured again; seat or quantity updates must change exactly the expected number of rows, else roll back |
 | Expire reservations | order | pending orders joined to active expired holds | Runs before each order creation for that event |
-| Join queue | queue | queue session | One entry per customer (`uq_queue_customer`); positions assigned under the session lock |
+| Join queue | queue | queue session (created on the first join) | One session per event (`ON DUPLICATE KEY` on the unique event id); one entry per customer (`uq_queue_customer`); positions assigned under the session lock |
 | Admit next batch | queue | queue session, then the next `WAITING` entries in position order | Serialises the scheduler across replicas; batch bounded by buyer cap and seats left |
-| Issue tickets | ticket | named lock `ticket-order-<id>`, then the order's existing tickets | Inserts only missing tickets per order item |
+| Issue tickets | ticket | named lock `ticket-order-<id>`, then the order's existing tickets, then each general-admission section's counter in `inventory_item_id` order | Inserts only missing tickets per order item; section numbers come from the locked counter, so they are unique (`uq_ticket_section_seat`) and a rollback returns them |
 | Check in | ticket | the ticket | Only `ISSUED` becomes `CHECKED_IN`; every attempt logged |
 | Edit seat | inventory | the seat | Cannot change a held or sold seat |
-| Reconfigure inventory | inventory | the event's items and non-available seats | Cannot shrink below what is reserved or sold |
+| Reconfigure inventory | inventory | the event's items and non-available seats | Cannot shrink below what is reserved or sold; seated maps capped at 400 seats (AISS-15) |
+| Change a draft's tier | event | the event, its items and holds | Refused if anything is reserved or sold; otherwise the old seats, zones, stage and grid are deleted in the same transaction |
 | Cancel or publish event | event | the event | Cancel and publish cannot interleave |
 
 **Deadlock avoidance.** Seats are always locked in ascending `seat_id`, and multi-table transactions lock the parent row (session, order, event) before child rows. MySQL detects any remaining deadlock and rolls back one transaction, which the service reports as an error the client can retry.
