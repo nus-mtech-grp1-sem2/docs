@@ -49,7 +49,6 @@ flowchart TB
     GW -->|/api/queue| Q
     GW -->|/api/order| ORD
     GW -->|/api/ticket| TKT
-    GW -->|/api/notification| NTF
 
     EV --> S_EI
     INV --> S_EI
@@ -72,6 +71,6 @@ flowchart TB
     OE -->|consume| TKT
     Q -->|CustomerAdmitted| CA
     ORD -->|"admit-next (sync, 1 s timeout)"| Q
-    TKT -->|"order-confirmation,<br/>event-cancellation (sync)"| NTF
+    TKT -->|"order-confirmation,<br/>event-cancellation<br/>(sync, internal token)"| NTF
     NTF --> Mail
     EV -->|"user lookup"| IdP

@@ -1,6 +1,7 @@
-%% Figure: ticketing schema, as built. Owned by the ticket service.
+%% Figure: ticketing schema, as built (migrations 02-19). Owned by the ticket service.
 erDiagram
     TICKETS ||--o{ CHECK_IN_LOGS : records
+    GA_SECTION_COUNTERS ||--o{ TICKETS : "numbers (logical)"
     TICKETS {
         bigint ticket_id PK
         bigint order_id "logical ref checkout.orders"
@@ -10,6 +11,8 @@ erDiagram
         varchar customer_email
         varchar customer_name
         bigint seat_id "nullable, logical ref"
+        bigint section_item_id "nullable, GA section, UK with number"
+        int section_seat_number "nullable, 1, 2, 3 per section"
         varchar qr_token "UK, 32 random bytes"
         enum status "ISSUED, CHECKED_IN, VOID"
         datetime issued_at
@@ -23,4 +26,8 @@ erDiagram
         enum result "SUCCESS, DUPLICATE, INVALID, WRONG_EVENT"
         varchar attempted_token "nullable, first 128 chars"
         datetime scanned_at
+    }
+    GA_SECTION_COUNTERS {
+        bigint inventory_item_id PK "logical ref event_inventory.inventory_items"
+        int last_number "locked and incremented on issue"
     }

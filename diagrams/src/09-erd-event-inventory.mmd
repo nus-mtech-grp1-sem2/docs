@@ -1,4 +1,4 @@
-%% Figure: event_inventory schema, as built (checked against the live database, 2026-10-05). Owned by the event and inventory services.
+%% Figure: event_inventory schema, as built (checked against the live database, 2026-10-05; migrations to 19). Owned by the event and inventory services.
 erDiagram
     EVENTS ||--o{ EVENT_TEAM_MEMBERSHIPS : "staffed by"
     EVENTS ||--o{ INVENTORY_ITEMS : offers
@@ -41,7 +41,7 @@ erDiagram
     INVENTORY_ITEMS {
         bigint inventory_item_id PK
         bigint event_id FK
-        varchar name "zone or tier name"
+        varchar name "zone name, or __STAGE__ for a stage piece"
         varchar section_code "nullable"
         int total_qty
         int reserved_qty "CHECK reserved+sold <= total"

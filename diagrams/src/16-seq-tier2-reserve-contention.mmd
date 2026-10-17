@@ -1,4 +1,4 @@
-%% Figure: Tier 2 purchase under contention. Two admitted customers select the same seat.
+%% Figure: Seated (Tier 2) purchase under contention. Two admitted customers select the same seat.
 sequenceDiagram
     autonumber
     actor A as Customer A
@@ -9,7 +9,7 @@ sequenceDiagram
     participant O as Order service
     participant DB as MySQL (event_inventory, queue, checkout)
 
-    Note over A,Q: Waiting room (Tier 2 only)
+    Note over A,Q: Queue (both tiers, the first join creates the session)
     A->>K: POST /api/queue/events/42/queue/join
     K->>Q: POST /events/42/queue/join (rate limited 60/min/IP)
     Q->>DB: lock queue_sessions row, insert queue_entries (WAITING, position n)

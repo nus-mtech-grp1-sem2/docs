@@ -1,8 +1,8 @@
 # Solution Overview
 
-OneStage is a ticketing platform for events of any size. One platform sells an 8-seat general-admission workshop and an 8,000-seat seated concert. The design centres on one guarantee: **no seat or ticket is ever sold twice**, even when thousands of buyers arrive in the same second. A virtual waiting room protects that guarantee by levelling the load on large on-sales.
+OneStage is a ticketing platform for events of any size. One platform sells an 8-seat general-admission workshop, a 400-seat seated theatre and a general-admission festival of many thousands. The design centres on one guarantee: **no seat or ticket is ever sold twice**, even when thousands of buyers arrive in the same second. A virtual queue in front of every on-sale protects that guarantee by letting only a capped number of buyers choose tickets at any one time.
 
-This chapter describes the system as built and deployed on 4 October 2026. The original design (August 2026) is kept in `archive/` as a historical record. The table at the end of this chapter lists where the build departed from it and why.
+This chapter describes the system as built and deployed on 17 October 2026. The original design (August 2026) is kept in `archive/` as a historical record. The table at the end of this chapter lists where the build departed from it and why.
 
 ## System context
 
@@ -12,8 +12,8 @@ Table: Actors and external systems
 
 | Element | Kind | Role in the solution |
 |---|---|---|
-| Customer | Person | Browses events, joins the waiting room, reserves seats or a quantity, pays and receives QR e-tickets |
-| Event Organiser | Person | Creates and publishes events, configures inventory and the waiting room, manages the event team, views sales and attendees, cancels events |
+| Customer | Person | Browses events, queues for any event (several at once if they like), reserves seats or a quantity once admitted, pays and receives QR e-tickets |
+| Event Organiser | Person | Creates and publishes events, configures inventory and the number of buyers admitted at once, manages the event team, views sales and attendees, cancels events |
 | Event Helper | Person | Scans tickets at the door, looks up attendees manually, watches check-in progress |
 | Amazon Cognito | External service (AWS) | Sign-up, sign-in (managed login) and token issue. Services verify the access token and look up user profiles |
 | Gmail SMTP | External service | Delivers ticket and cancellation emails |
@@ -33,7 +33,7 @@ Table: Main elements of the as-built solution
 | Data | One MySQL 8.0 server with five schemas, one per bounded context, running as an ECS task on encrypted Amazon EFS |
 | Compute | Amazon ECS on AWS Fargate, ECS Service Connect for service discovery, target-tracking autoscaling |
 | Infrastructure as code | Terraform (one state, S3 backend). GitHub Actions deploy through OIDC-federated IAM roles |
-| Scale | 9 ECS services, 5 schemas, 14 tables, 57 business HTTP endpoints (plus a `/health` per service), 3 queues + 1 DLQ |
+| Scale | 9 ECS services, 5 schemas, 15 tables, 60 business HTTP endpoints (plus a `/health` per service), 3 queues + 1 DLQ |
 
 ## How this chapter is organised
 
@@ -45,9 +45,9 @@ Table: Chapter map
 | Platform Design | Seed, producers and consumers, bounded contexts, context map, aggregates, domain events |
 | Physical Architecture and Design | Physical decisions AD-12 to AD-22, physical detail deployment diagram, technology and services |
 | Persistence Design | Schemas, logical data model, transactions and concurrency, retention, data classification |
-| Detailed Design | Tier 2 purchase under contention; asynchronous payment and ticket issuance; door check-in |
+| Detailed Design | Buyer journey for both tiers; seated purchase under contention; asynchronous payment and ticket issuance; door check-in |
 | Other Architectural Decisions | AD-23 to AD-30: delivery, security pipeline, cost and governance decisions |
-| Architectural Limitations | AISS-01 to AISS-14 with impact, resolution and status |
+| Architectural Limitations | AISS-01 to AISS-17 with impact, resolution and status |
 | API catalogue | Every HTTP endpoint, by service (appendix) |
 
 ## Original design versus the system as built
@@ -68,3 +68,6 @@ Table: Where the build departed from the original design
 | Payment | Synchronous `POST /orders/{id}/payment` | Asynchronous `payment-requests` (202 + polling); synchronous endpoint kept for compatibility | Resilience to slow payment providers; load levelling of checkout | AD-05 |
 | Team removal | Soft revoke (`REVOKED` status kept for audit) | Soft revoke (`REVOKED` with `revoked_at`, `revoked_by_sub`); invitations add `PENDING`/`ACCEPTED`/`REJECTED` | First built as a hard delete for a simpler invitation model; soft revoke restored so past access stays auditable (in testing) | AISS-13 |
 | Compute | ECS on EC2 with capacity providers (ADR-0001) | ECS on Fargate (ADR-0003) | EC2 networking failures (NAT instance, ENI trunking) during deployment | AD-12 |
+| Queue scope | Waiting room for Tier 2 on-sales only; Tier 1 buys directly | Every on-sale, Tier 1 and Tier 2, goes through the queue; the order service refuses an order without a live admission token | One purchase path to test and protect; a popular general-admission event needs load levelling as much as a seated one | AD-03 |
+| Queue opening | Organiser sets an on-sale time and admission rate before publishing | The queue opens when the event is published; the first buyer to join creates it, sized from the event's buyer cap. Organisers tune only the buyer cap, also while on sale | Removes a manual step, so a published event can always be bought; admission pace follows from the buyer cap instead of a separate rate setting | AD-03, AISS-14 |
+| Seated capacity | Seat maps of 8 to 8,000 seats | Seat maps of up to 400 seats (a 20 × 20 grid); general admission has no practical limit | Every seat is its own row, generated from a grid that the build capped at 20 × 20; general-admission sections were given an explicit quantity instead | AISS-15 |

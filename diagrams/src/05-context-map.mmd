@@ -10,6 +10,7 @@ flowchart TB
         CAT ---|Shared Kernel| INV
         INV ---|Shared Kernel| CHK
         WR -->|Customer-Supplier| INV
+        WR -->|Customer-Supplier| CAT
         CHK -->|Customer-Supplier| WR
     end
 

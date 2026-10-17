@@ -1,12 +1,12 @@
 %% Figure: Platform view. Seed, producers, consumers and core interactions.
 flowchart TB
-    ORG(["<b>Producers: Organisers</b><br/>create events, inventory,<br/>waiting rooms, teams"])
+    ORG(["<b>Producers: Organisers</b><br/>create and publish events,<br/>inventory, buyer caps, teams"])
     HLP(["<b>Producers: Helpers</b><br/>produce check-in data"])
     CUS(["<b>Consumers: Customers</b><br/>buy and attend"])
 
     subgraph Platform["OneStage platform"]
         SEED[["<b>Seed: a ticketable event</b><br/>its inventory and its QR tickets"]]
-        CORE["<b>Core interaction</b><br/>discover → queue (Tier 2) → reserve →<br/>pay → receive ticket → check in"]
+        CORE["<b>Core interaction</b><br/>discover → queue → admitted → reserve →<br/>pay → receive ticket → check in"]
         SEED --> CORE
     end
 
