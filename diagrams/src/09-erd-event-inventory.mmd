@@ -47,12 +47,12 @@ erDiagram
         int reserved_qty "CHECK reserved+sold <= total"
         int sold_qty
         int price_cents
+        json layout_config "nullable"
         char color "nullable"
         smallint grid_row "nullable"
         smallint grid_col "nullable"
         smallint grid_row_span
         smallint grid_col_span
-        json layout_config "nullable"
         int version "bumped on every change"
         datetime created_at
     }
@@ -82,7 +82,7 @@ erDiagram
         datetime created_at
     }
     EVENT_GRID_SETTINGS {
-        bigint event_id PK "FK events"
+        bigint event_id PK, FK
         smallint grid_rows
         smallint grid_cols
     }
