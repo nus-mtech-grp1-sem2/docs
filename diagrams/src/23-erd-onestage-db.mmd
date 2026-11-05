@@ -1,0 +1,214 @@
+%% Figure: onestage-db, all five schemas in one view (checked against the live database, MySQL 8.0.46, 2026-11-05).
+%% Solid lines are enforced foreign keys inside a schema. Dashed lines are logical references across schemas: an id column with no FK constraint.
+erDiagram
+    EVENTS ||--o{ EVENT_TEAM_MEMBERSHIPS : "staffed by"
+    EVENTS ||--o| EVENT_GRID_SETTINGS : "laid out by"
+    EVENTS ||--o{ INVENTORY_ITEMS : offers
+    EVENTS ||--o{ SEATS : contains
+    EVENTS ||--o{ INVENTORY_HOLDS : locks
+    INVENTORY_ITEMS ||--o{ SEATS : "zone of (Tier 2)"
+    INVENTORY_ITEMS |o--o{ INVENTORY_HOLDS : "reserved via (Tier 1)"
+    INVENTORY_HOLDS |o--o{ SEATS : "holds (Tier 2)"
+
+    EVENTS ||..o| QUEUE_SESSIONS : "queued by"
+    QUEUE_SESSIONS ||--o{ QUEUE_ENTRIES : contains
+
+    EVENTS ||..o{ ORDERS : "sold in"
+    INVENTORY_HOLDS ||..o| ORDERS : "confirmed as"
+    ORDERS ||--|{ ORDER_ITEMS : contains
+    ORDERS ||--o{ PAYMENTS : "paid via"
+    INVENTORY_ITEMS ||..o{ ORDER_ITEMS : "priced from"
+
+    ORDER_ITEMS ||..o{ TICKETS : "issued as"
+    INVENTORY_ITEMS ||..o| GA_SECTION_COUNTERS : "numbered by"
+    TICKETS |o--o{ CHECK_IN_LOGS : records
+
+    ORDERS ||..o{ EMAIL_NOTIFICATIONS : "confirmed by"
+    TICKETS |o..o| EMAIL_NOTIFICATIONS : "emailed"
+
+    EVENTS["event_inventory.events"] {
+        bigint event_id PK
+        varchar organiser_sub "Cognito sub of owner"
+        varchar title
+        text description "nullable"
+        varchar venue
+        datetime starts_at "UTC"
+        int total_seats
+        int available_buyers "nullable, CHECK 1..total_seats"
+        enum tier "TIER1_GA, TIER2_SEATED"
+        enum status "DRAFT, PUBLISHED, CANCELLED"
+        varchar image_mime_type "nullable"
+        mediumblob image_data "nullable"
+        datetime created_at
+        datetime updated_at
+    }
+    EVENT_TEAM_MEMBERSHIPS["event_inventory.event_team_memberships"] {
+        bigint membership_id PK
+        bigint event_id FK
+        varchar user_sub "UK with event_id"
+        varchar user_email
+        enum role "ORGANISER, HELPER"
+        enum invite_status "PENDING, ACCEPTED, REJECTED, REVOKED"
+        varchar granted_by_sub
+        datetime granted_at
+        datetime responded_at "nullable"
+        datetime revoked_at "nullable"
+        varchar revoked_by_sub "nullable"
+    }
+    EVENT_GRID_SETTINGS["event_inventory.event_grid_settings"] {
+        bigint event_id PK, FK
+        smallint grid_rows "default 6"
+        smallint grid_cols "default 8"
+    }
+    INVENTORY_ITEMS["event_inventory.inventory_items"] {
+        bigint inventory_item_id PK
+        bigint event_id FK
+        varchar name "zone name"
+        varchar section_code "nullable"
+        int total_qty
+        int reserved_qty "CHECK reserved+sold <= total"
+        int sold_qty
+        int price_cents
+        json layout_config "nullable"
+        char color "nullable"
+        smallint grid_row "nullable"
+        smallint grid_col "nullable"
+        smallint grid_row_span
+        smallint grid_col_span
+        int version
+        datetime created_at
+    }
+    SEATS["event_inventory.seats"] {
+        bigint seat_id PK
+        bigint event_id FK
+        bigint inventory_item_id FK
+        varchar seat_label "UK with event_id"
+        varchar row_label "nullable"
+        smallint seat_number "nullable"
+        smallint pos_x "nullable"
+        smallint pos_y "nullable"
+        enum status "AVAILABLE, HELD, SOLD, BLOCKED"
+        enum tag "NONE, ACCESSIBLE, MAINTENANCE"
+        bigint hold_id FK "nullable"
+        datetime updated_at
+    }
+    INVENTORY_HOLDS["event_inventory.inventory_holds"] {
+        bigint hold_id PK
+        bigint event_id FK
+        bigint inventory_item_id FK "nullable"
+        varchar customer_sub
+        int quantity
+        enum status "ACTIVE, CONFIRMED, RELEASED, EXPIRED"
+        bigint order_id "nullable, logical ref"
+        datetime expires_at
+        datetime created_at
+    }
+
+    QUEUE_SESSIONS["queue.queue_sessions"] {
+        bigint queue_session_id PK
+        bigint event_id UK "logical ref"
+        datetime opens_at
+        int admission_batch_size
+        int admission_interval_sec
+        enum status "CLOSED, OPEN, DRAINED"
+        bigint next_position "default 0"
+        bigint serving_position "default 0"
+    }
+    QUEUE_ENTRIES["queue.queue_entries"] {
+        bigint queue_entry_id PK
+        bigint queue_session_id FK
+        varchar customer_sub "UK with session"
+        bigint position
+        enum status "WAITING, ADMITTED, IN_CHECKOUT, EXPIRED, LEFT"
+        datetime joined_at
+        datetime admitted_at "nullable"
+        varchar admission_token "nullable"
+        datetime token_expires_at "nullable"
+    }
+
+    ORDERS["checkout.orders"] {
+        bigint order_id PK
+        bigint event_id "logical ref"
+        varchar customer_sub
+        varchar customer_email
+        varchar customer_name
+        bigint hold_id UK "logical ref"
+        enum status "PENDING, PAID, FAILED, CANCELLED"
+        int total_amount_cents
+        char currency "default SGD"
+        datetime created_at
+        datetime paid_at "nullable"
+    }
+    ORDER_ITEMS["checkout.order_items"] {
+        bigint order_item_id PK
+        bigint order_id FK
+        bigint inventory_item_id "logical ref"
+        bigint seat_id "nullable, logical ref"
+        varchar description
+        int quantity
+        int unit_price_cents
+    }
+    PAYMENTS["checkout.payments"] {
+        bigint payment_id PK
+        bigint order_id FK
+        varchar payment_token
+        enum status "AUTHORIZED, CAPTURED, FAILED"
+        int amount_cents
+        datetime processed_at
+    }
+
+    TICKETS["ticketing.tickets"] {
+        bigint ticket_id PK
+        bigint order_id "logical ref"
+        bigint order_item_id "logical ref"
+        bigint event_id "logical ref"
+        varchar customer_sub
+        varchar customer_email
+        varchar customer_name
+        bigint seat_id "nullable, logical ref"
+        bigint section_item_id "nullable, UK with number"
+        int section_seat_number "nullable"
+        varchar qr_token UK
+        enum status "ISSUED, CHECKED_IN, VOID"
+        datetime issued_at
+        datetime checked_in_at "nullable"
+        varchar checked_in_by_sub "nullable"
+    }
+    CHECK_IN_LOGS["ticketing.check_in_logs"] {
+        bigint log_id PK
+        bigint ticket_id FK "nullable"
+        varchar scanned_by_sub
+        enum result "SUCCESS, DUPLICATE, INVALID, WRONG_EVENT"
+        varchar attempted_token "nullable"
+        datetime scanned_at
+    }
+    GA_SECTION_COUNTERS["ticketing.ga_section_counters"] {
+        bigint inventory_item_id PK "logical ref"
+        int last_number
+    }
+
+    EMAIL_NOTIFICATIONS["notification.email_notifications"] {
+        bigint notification_id PK
+        bigint order_id "logical ref"
+        bigint ticket_id UK "nullable, logical ref"
+        bigint event_id "logical ref"
+        varchar customer_sub
+        varchar customer_email
+        enum type "ORDER_CONFIRMATION, EVENT_CANCELLATION"
+        enum status "PENDING, SENT, FAILED"
+        varchar subject
+        text error_message "nullable"
+        datetime sent_at "nullable"
+        datetime created_at
+    }
+
+    classDef ei fill:#e3f0fb,stroke:#2f6fa8
+    classDef qu fill:#fdf1dc,stroke:#b7791f
+    classDef co fill:#e4f4e6,stroke:#2f8a46
+    classDef ti fill:#f1e6f7,stroke:#7d4a9e
+    classDef no fill:#fbe4e4,stroke:#b23b3b
+    class EVENTS,EVENT_TEAM_MEMBERSHIPS,EVENT_GRID_SETTINGS,INVENTORY_ITEMS,SEATS,INVENTORY_HOLDS ei
+    class QUEUE_SESSIONS,QUEUE_ENTRIES qu
+    class ORDERS,ORDER_ITEMS,PAYMENTS co
+    class TICKETS,CHECK_IN_LOGS,GA_SECTION_COUNTERS ti
+    class EMAIL_NOTIFICATIONS no

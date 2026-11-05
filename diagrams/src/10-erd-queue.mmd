@@ -8,6 +8,8 @@ erDiagram
         int admission_batch_size
         int admission_interval_sec
         enum status "CLOSED, OPEN, DRAINED"
+        bigint next_position "default 0"
+        bigint serving_position "default 0"
     }
     QUEUE_ENTRIES {
         bigint queue_entry_id PK
